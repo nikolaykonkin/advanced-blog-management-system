@@ -1,56 +1,42 @@
 package apperrors
 
-// TODO: Определить переменные-ошибки для приложения
-//
-// Создайте глобальные переменные используя пакет errors:
-// - ErrUnauthorized для случаев когда пользователь не авторизован (401)
-// - ErrForbidden для случаев когда нет прав доступа (403)
-// - ErrUserNotFound когда пользователь не существует (404)
-// - ErrUserAlreadyExists когда пользователь уже зарегистрирован (409)
-// - ErrInvalidCredentials когда неверный пароль или email (400)
-// - ErrPostNotFound когда пост не найден (404)
-// - ErrCommentNotFound когда комментарий не найден (404)
-// - ErrInvalidPostID когда ID поста некорректен (400)
-//
-// Каждую ошибку создавайте с описанием что произошло.
+import (
+	"errors"
+	"net/http"
+)
 
-// TODO: Использовать эти ошибки в правильных местах приложения
-//
-// **В РЕПОЗИТОРИЯХ:**
-// - Если SELECT не вернул результата (not found) → возвращайте nil, nil
-// - Если произошла реальная ошибка БД → оборачивайте с контекстом: fmt.Errorf("operation failed: %w", err)
-// - Не возвращайте определённые ошибки (ErrUserNotFound и т.п.) - это задача сервиса
-//
-// **В СЕРВИСАХ:**
-// - Получайте результаты репозиториев
-// - Если repo вернул nil, nil (не найдено) → преобразуйте в нужную ошибку (ErrUserNotFound и т.п.)
-// - Если repo вернул ошибку БД → обработайте или передайте дальше
-// - Проверяйте бизнес-логику и возвращайте ошибки:
-//   * пользователь уже существует → ErrUserAlreadyExists
-//   * неверный пароль → ErrInvalidCredentials
-//   * нет прав редактировать → ErrForbidden
-//   * и т.д.
-//
-// **В ОБРАБОТЧИКАХ:**
-// - Получайте ошибку из сервиса
-// - Определяйте тип ошибки используя errors.Is()
-// - Выбирайте правильный HTTP статус код:
-//   * ErrUnauthorized → 401
-//   * ErrForbidden → 403
-//   * ErrUserNotFound/ErrPostNotFound/ErrCommentNotFound → 404
-//   * ErrUserAlreadyExists → 409
-//   * ErrInvalidCredentials/ErrInvalidPostID → 400
-//   * Неизвестные ошибки → 500
-// - Отправляйте ответ с нужным кодом и сообщением об ошибке
+var (
+	ErrUnauthorized       = errors.New("unauthorized")
+	ErrForbidden          = errors.New("forbidden")
+	ErrUserNotFound       = errors.New("user not found")
+	ErrUserAlreadyExists  = errors.New("user with this email or username already exists")
+	ErrInvalidCredentials = errors.New("invalid email or password")
+	ErrPostNotFound       = errors.New("post not found")
+	ErrCommentNotFound    = errors.New("comment not found")
+	ErrInvalidPostID      = errors.New("invalid post id")
+)
 
-// TODO: (Опционально) Создать функцию для преобразования ошибок
-//
-// Может быть полезно создать вспомогательную функцию которая преобразует
-// любую ошибку в правильный HTTP статус код. Это упростит код в обработчиках
-// и сделает преобразование централизованным.
-//
-// Функция должна:
-// - Принимать ошибку
-// - Проверить какая это ошибка используя errors.Is()
-// - Вернуть соответствующий http.Status код
-// - Для неизвестных ошибок вернуть 500
+// ToHTTPStatus сопоставляет ошибку приложения с HTTP статус-кодом
+// Неизвестные ошибки сопоставляются с 500
+func ToHTTPStatus(err error) int {
+	switch {
+	case errors.Is(err, ErrUnauthorized):
+		return http.StatusUnauthorized
+	case errors.Is(err, ErrForbidden):
+		return http.StatusForbidden
+	case errors.Is(err, ErrUserNotFound):
+		return http.StatusNotFound
+	case errors.Is(err, ErrPostNotFound):
+		return http.StatusNotFound
+	case errors.Is(err, ErrCommentNotFound):
+		return http.StatusNotFound
+	case errors.Is(err, ErrUserAlreadyExists):
+		return http.StatusConflict
+	case errors.Is(err, ErrInvalidCredentials):
+		return http.StatusBadRequest
+	case errors.Is(err, ErrInvalidPostID):
+		return http.StatusBadRequest
+	default:
+		return http.StatusInternalServerError
+	}
+}
