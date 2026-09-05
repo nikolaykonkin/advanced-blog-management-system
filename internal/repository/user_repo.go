@@ -27,7 +27,7 @@ func NewUserRepository(db *sql.DB) UserRepository {
 }
 
 func (r *userRepository) Create(ctx context.Context, user *model.User) error {
-	now := time.Now()
+	now := time.Now().UTC()
 	user.CreatedAt = now
 	user.UpdatedAt = now
 
@@ -118,7 +118,7 @@ func (r *userRepository) ExistsByUsername(ctx context.Context, username string) 
 }
 
 func (r *userRepository) Update(ctx context.Context, user *model.User) error {
-	user.UpdatedAt = time.Now()
+	user.UpdatedAt = time.Now().UTC()
 
 	query := `UPDATE users SET username = $1, email = $2, password = $3, updated_at = $4 WHERE id = $5`
 	result, err := r.db.ExecContext(ctx, query, user.Username, user.Email, user.Password, user.UpdatedAt, user.ID)

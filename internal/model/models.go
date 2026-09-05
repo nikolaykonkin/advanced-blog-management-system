@@ -1,8 +1,8 @@
 package model
 
 import (
-	"time"
 	"github.com/go-playground/validator/v10"
+	"time"
 )
 
 var validate = validator.New()
