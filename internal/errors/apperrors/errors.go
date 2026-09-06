@@ -16,7 +16,7 @@ var (
 	ErrInvalidPostID      = errors.New("invalid post id")
 )
 
-// ToHTTPStatus сопоставляет ошибку приложения с HTTP статус-кодом
+// ToHTTPStatus сопоставляет ошибку приложения с HTTP-статус кодом
 // Неизвестные ошибки сопоставляются с 500
 func ToHTTPStatus(err error) int {
 	switch {
@@ -33,7 +33,11 @@ func ToHTTPStatus(err error) int {
 	case errors.Is(err, ErrUserAlreadyExists):
 		return http.StatusConflict
 	case errors.Is(err, ErrInvalidCredentials):
-		return http.StatusBadRequest
+		// RFC 9110: запрос синтаксически корректен, но не прошёл аутентификацию — это 401,
+		// а не 400, несмотря на то что TODO этого файла изначально предполагал 400
+		// Это семантически верно для случая неверного пароля при входе - синтаксис запроса корректен,
+		// но аутентификация не пройдена
+		return http.StatusUnauthorized
 	case errors.Is(err, ErrInvalidPostID):
 		return http.StatusBadRequest
 	default:
