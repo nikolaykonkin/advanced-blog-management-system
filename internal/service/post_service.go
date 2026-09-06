@@ -1,10 +1,15 @@
 package service
 
 import (
+	"advanced-blog-management-system/internal/errors/apperrors"
 	"advanced-blog-management-system/internal/model"
 	"advanced-blog-management-system/internal/repository"
 	"context"
+	"fmt"
+	"time"
 )
+
+const commentDeletionPageSize = 100
 
 type PostService struct {
 	postRepo    repository.PostRepository
@@ -21,57 +26,151 @@ func NewPostService(postRepo repository.PostRepository, userRepo repository.User
 }
 
 func (s *PostService) CreatePost(ctx context.Context, req *model.PostCreateRequest, authorID int) (*model.Post, error) {
-	// TODO: Реализовать создание поста
-	// 1. Валидировать входные данные (req.Validate())
-	// 2. Создать объект Post с данными из запроса
-	// 3. Если PublishAt не указан или в прошлом - установить status "published"
-	// 4. Если PublishAt в будущем - установить status "draft"
-	// 5. Сохранить пост через репозиторий
-	// 6. Вернуть созданный пост
-	return nil, nil
+	if err := req.Validate(); err != nil {
+		return nil, err
+	}
+
+	post := &model.Post{
+		Title:    req.Title,
+		Content:  req.Content,
+		AuthorID: authorID,
+	}
+
+	now := time.Now().UTC()
+	if req.PublishAt == nil || !req.PublishAt.After(now) {
+		post.Status = model.PostStatusPublished
+	} else {
+		publishAt := req.PublishAt.UTC()
+		post.Status = model.PostStatusDraft
+		post.PublishAt = &publishAt
+	}
+
+	if err := s.postRepo.Create(ctx, post); err != nil {
+		return nil, fmt.Errorf("failed to create post: %w", err)
+	}
+
+	return post, nil
 }
 
 func (s *PostService) GetPost(ctx context.Context, id int) (*model.Post, error) {
-	// TODO: Реализовать получение поста по ID
-	return nil, nil
+	post, err := s.postRepo.GetByID(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get post: %w", err)
+	}
+	if post == nil {
+		return nil, apperrors.ErrPostNotFound
+	}
+	return post, nil
 }
 
 func (s *PostService) GetAllPosts(ctx context.Context, limit, offset int) ([]*model.Post, error) {
-	// TODO: Реализовать получение всех постов с пагинацией
-	return nil, nil
+	posts, err := s.postRepo.GetAll(ctx, limit, offset)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get posts: %w", err)
+	}
+	return posts, nil
 }
 
 func (s *PostService) GetPostsCount(ctx context.Context) (int, error) {
-	// TODO: Реализовать получение количества всех постов
-	return 0, nil
+	count, err := s.postRepo.GetTotalCount(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("failed to count posts: %w", err)
+	}
+	return count, nil
 }
 
 func (s *PostService) UpdatePost(ctx context.Context, id int, req *model.PostUpdateRequest, userID int) (*model.Post, error) {
-	// TODO: Реализовать обновление поста
-	// 1. Валидировать входные данные
-	// 2. Получить пост по ID
-	// 3. Проверить что пользователь является автором поста (post.CanBeEditedBy(userID))
-	// 4. Обновить поля поста
-	// 5. Сохранить изменения
-	// 6. Вернуть обновленный пост
-	return nil, nil
+	if err := req.Validate(); err != nil {
+		return nil, err
+	}
+
+	post, err := s.postRepo.GetByID(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get post: %w", err)
+	}
+	if post == nil {
+		return nil, apperrors.ErrPostNotFound
+	}
+	if !post.CanBeEditedBy(userID) {
+		return nil, apperrors.ErrForbidden
+	}
+
+	post.Title = req.Title
+	post.Content = req.Content
+	if req.Status != "" {
+		post.Status = req.Status
+	}
+	if req.PublishAt != nil {
+		publishAt := req.PublishAt.UTC()
+		post.PublishAt = &publishAt
+	} else {
+		post.PublishAt = nil
+	}
+
+	if err := s.postRepo.Update(ctx, post); err != nil {
+		return nil, fmt.Errorf("failed to update post: %w", err)
+	}
+
+	return post, nil
 }
 
 func (s *PostService) DeletePost(ctx context.Context, id int, userID int) error {
-	// TODO: Реализовать удаление поста
-	// 1. Получить пост по ID
-	// 2. Проверить что пользователь является автором поста (post.CanBeDeletedBy(userID))
-	// 3. Удалить пост через репозиторий
-	// 4. Также удалить все комментарии к этому посту
+	post, err := s.postRepo.GetByID(ctx, id)
+	if err != nil {
+		return fmt.Errorf("failed to get post: %w", err)
+	}
+	if post == nil {
+		return apperrors.ErrPostNotFound
+	}
+	if !post.CanBeDeletedBy(userID) {
+		return apperrors.ErrForbidden
+	}
+
+	if err := s.deleteAllCommentsForPost(ctx, id); err != nil {
+		return fmt.Errorf("failed to delete comments for post: %w", err)
+	}
+
+	if err := s.postRepo.Delete(ctx, id); err != nil {
+		return fmt.Errorf("failed to delete post: %w", err)
+	}
+
 	return nil
 }
 
+// deleteAllCommentsForPost вычищает все комментарии к посту постранично.
+// offset намеренно всегда 0: после удаления очередной страницы эти строки
+// исчезают из таблицы, и следующий запрос с тем же offset=0 забирает уже
+// новую "первую страницу" оставшихся комментариев — а не пропускает их,
+// как было бы при обычной постраничной навигации по неизменным данным.
+func (s *PostService) deleteAllCommentsForPost(ctx context.Context, postID int) error {
+	for {
+		comments, err := s.commentRepo.GetByPostID(ctx, postID, commentDeletionPageSize, 0)
+		if err != nil {
+			return err
+		}
+		if len(comments) == 0 {
+			return nil
+		}
+		for _, c := range comments {
+			if err := s.commentRepo.Delete(ctx, c.ID); err != nil {
+				return err
+			}
+		}
+	}
+}
+
 func (s *PostService) GetPostsByAuthor(ctx context.Context, authorID int, limit, offset int) ([]*model.Post, error) {
-	// TODO: Реализовать получение постов автора с пагинацией
-	return nil, nil
+	posts, err := s.postRepo.GetByAuthorID(ctx, authorID, limit, offset)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get posts by author: %w", err)
+	}
+	return posts, nil
 }
 
 func (s *PostService) GetPostsCountByAuthor(ctx context.Context, authorID int) (int, error) {
-	// TODO: Реализовать получение количества постов автора
-	return 0, nil
+	count, err := s.postRepo.GetTotalCountByAuthorID(ctx, authorID)
+	if err != nil {
+		return 0, fmt.Errorf("failed to count posts by author: %w", err)
+	}
+	return count, nil
 }
