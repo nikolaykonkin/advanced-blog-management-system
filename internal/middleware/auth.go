@@ -3,6 +3,7 @@ package middleware
 import (
 	"advanced-blog-management-system/pkg/auth"
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"os"
@@ -32,19 +33,29 @@ func AuthMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		token, err := ExtractToken(r)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusUnauthorized)
+			writeAuthError(w, err.Error(), http.StatusUnauthorized)
 			return
 		}
 
 		claims, err := auth.ValidateToken(token, jwtSecret())
 		if err != nil {
-			http.Error(w, "invalid or expired token", http.StatusUnauthorized)
+			writeAuthError(w, "invalid or expired token", http.StatusUnauthorized)
 			return
 		}
 
 		ctx := context.WithValue(r.Context(), UserKey, claims.UserID)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+// writeAuthError отвечает в том же JSON-формате, что и respondWithError в пакете handler —
+// иначе ошибки от AuthMiddleware (401 до того, как запрос вообще дошёл до хендлера)
+// приходили бы клиенту голым текстом (как пишет http.Error), а ошибки бизнес-логики — JSON'ом,
+// что несогласованно для одного и того же API
+func writeAuthError(w http.ResponseWriter, message string, code int) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	json.NewEncoder(w).Encode(map[string]string{"error": message})
 }
 
 // OptionalAuthMiddleware проверяет JWT токен если он присутствует, но не обязателен
