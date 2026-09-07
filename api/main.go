@@ -1,130 +1,213 @@
 package main
 
 import (
+	"advanced-blog-management-system/internal/handler"
+	"advanced-blog-management-system/internal/middleware"
+	"advanced-blog-management-system/internal/repository"
+	"advanced-blog-management-system/internal/service"
+	"advanced-blog-management-system/pkg/database"
+	"context"
 	"log"
+	"net/http"
+	"os"
+	"os/signal"
+	"path/filepath"
+	"sort"
+	"strconv"
+	"syscall"
+	"time"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/joho/godotenv"
 )
 
-func main() {
-	// TODO: Загрузить переменные окружения из .env файла
-	// Используйте github.com/joho/godotenv для загрузки .env
+type config struct {
+	dbHost     string
+	dbPort     int
+	dbUser     string
+	dbPassword string
+	dbName     string
+	dbSSLMode  string
 
-	// TODO: Прочитать конфигурацию из переменных окружения
-	// Ожидаемые переменные окружения:
-	// - DB_HOST (по умолчанию: localhost)
-	// - DB_PORT (по умолчанию: 5432)
-	// - DB_USER (по умолчанию: postgres)
-	// - DB_PASSWORD (по умолчанию: postgres)
-	// - DB_NAME (по умолчанию: blog_db)
-	// - DB_SSLMODE (по умолчанию: disable)
-	// - JWT_SECRET (ОБЯЗАТЕЛЬНАЯ - секретный ключ для JWT)
-	// - SERVER_HOST (по умолчанию: 0.0.0.0)
-	// - SERVER_PORT (по умолчанию: 8080)
-	//
-	// Подсказка: используйте os.Getenv() с fallback значениями
-	// или strconv для преобразования портов в числа
+	jwtSecret string
 
-	// TODO: Создать подключение к PostgreSQL
-	// Используйте функцию database.NewPostgresDB из pkg/database
-	// Передайте конфигурацию БД
-	// Обработайте возможные ошибки подключения
-
-	// TODO: Выполнить миграции БД
-	// Прочитайте SQL файлы из папки migrations/
-	// Выполните их в нужном порядке:
-	// 1. 001_init_schema.sql (создание таблиц)
-	// 2. 002_add_indexes.sql (создание индексов)
-	// Используйте функцию database.RunMigrations()
-
-	// TODO: Инициализировать репозитории
-	// Создайте экземпляры:
-	// - UserRepository
-	// - PostRepository
-	// - CommentRepository
-	// Передайте им подключение к БД
-
-	// TODO: Инициализировать сервисы
-	// Создайте экземпляры:
-	// - UserService (передайте userRepository)
-	// - PostService (передайте postRepository, userRepository, commentRepository)
-	// - CommentService (передайте commentRepository, postRepository, userRepository)
-
-	// TODO: Инициализировать обработчики (handlers)
-	// Создайте экземпляры:
-	// - AuthHandler (передайте userService и JWT_SECRET)
-	// - PostHandler (передайте postService)
-	// - CommentHandler (передайте commentService)
-
-	// TODO: Создать и настроить HTTP роутер
-	// Вызовите функцию setupRouter() которая вернет chi.Mux
-	// Роутер должен содержать:
-	// - Все middleware (логирование, recovery, CORS, аутентификация где нужна)
-	// - Все HTTP эндпоинты согласно спецификации
-
-	// TODO: Создать HTTP сервер
-	// Создайте структуру http.Server с:
-	// - Addr: полученный из конфигурации адрес и порт
-	// - Handler: роутер
-	// - ReadTimeout: 15 секунд
-	// - WriteTimeout: 15 секунд
-	// - IdleTimeout: 60 секунд
-
-	// TODO: Запустить сервер в отдельной горутине
-	// go func() { ... }()
-	// Обработайте ошибку http.ErrServerClosed как успех (это нормально при shutdown)
-
-	// TODO: Установить обработчик сигналов завершения
-	// Перехватите сигналы SIGINT и SIGTERM (ctrl+C, kill и т.д.)
-	// Используйте os.Signal и signal.Notify()
-
-	// TODO: Graceful shutdown
-	// Когда получен сигнал завершения:
-	// 1. Логируйте информацию о завершении
-	// 2. Создайте контекст с таймаутом (5-10 секунд)
-	// 3. Вызовите srv.Shutdown(ctx) для корректного завершения
-	// 4. Закройте подключение к БД: db.Close()
-	// 5. Выйдите из программы
-
-	// TODO: Логирование
-	// В главной функции логируйте ключевые события:
-	// - Загрузка конфигурации
-	// - Подключение к БД
-	// - Выполнение миграций
-	// - Запуск сервера (какой адрес и порт)
-	// - Получение сигнала завершения
-	// - Результат shutdown
-
-	log.Println("Server starting... (TODO: implement main.go)")
+	serverHost string
+	serverPort string
 }
 
-func setupRouter() interface{} {
-	// TODO: Создать chi роутер
-	// Используйте chi.NewRouter()
+func loadConfig() config {
+	dbPort, err := strconv.Atoi(getEnv("DB_PORT", "5432"))
+	if err != nil {
+		dbPort = 5432
+	}
 
-	// TODO: Зарегистрировать middleware в порядке:
-	// 1. LoggingMiddleware (должен быть первым)
-	// 2. RecoveryMiddleware
-	// 3. CORSMiddleware
+	jwtSecret := os.Getenv("JWT_SECRET")
+	if jwtSecret == "" {
+		log.Fatal("JWT_SECRET environment variable is required")
+	}
 
-	// TODO: Зарегистрировать все публичные эндпоинты:
-	// - GET /api/health (HealthCheckHandler)
-	// - POST /api/register
-	// - POST /api/login
-	// - GET /api/posts
-	// - GET /api/posts/{id}
-	// - GET /api/users/{id}/posts
-	// - GET /api/posts/{postId}/comments
+	return config{
+		dbHost:     getEnv("DB_HOST", "localhost"),
+		dbPort:     dbPort,
+		dbUser:     getEnv("DB_USER", "postgres"),
+		dbPassword: getEnv("DB_PASSWORD", "postgres"),
+		dbName:     getEnv("DB_NAME", "blog_db"),
+		dbSSLMode:  getEnv("DB_SSLMODE", "disable"),
 
-	// TODO: Зарегистрировать защищенные эндпоинты (требуют AuthMiddleware):
-	// - POST /api/posts
-	// - PUT /api/posts/{id}
-	// - DELETE /api/posts/{id}
-	// - POST /api/posts/{postId}/comments
-	// - PUT /api/comments/{id}
-	// - DELETE /api/comments/{id}
-	//
-	// Подсказка для защиты: используйте r.With(middleware.AuthMiddleware)
-	// или создайте отдельный роут-группу для защищенных эндпоинтов
+		jwtSecret: jwtSecret,
 
-	// TODO: Вернуть настроенный роутер
-	return nil
+		serverHost: getEnv("SERVER_HOST", "0.0.0.0"),
+		serverPort: getEnv("SERVER_PORT", "8080"),
+	}
+}
+
+func getEnv(key, fallback string) string {
+	if v, ok := os.LookupEnv(key); ok && v != "" {
+		return v
+	}
+	return fallback
+}
+
+// readMigrations читает все .sql файлы из папки migrations/ в порядке имён
+// и возвращает их содержимое как срез строк для database.RunMigrations
+func readMigrations() ([]string, error) {
+	entries, err := os.ReadDir("migrations")
+	if err != nil {
+		return nil, err
+	}
+
+	var names []string
+	for _, e := range entries {
+		if !e.IsDir() && filepath.Ext(e.Name()) == ".sql" {
+			names = append(names, e.Name())
+		}
+	}
+	sort.Strings(names)
+
+	migrations := make([]string, 0, len(names))
+	for _, name := range names {
+		content, err := os.ReadFile(filepath.Join("migrations", name))
+		if err != nil {
+			return nil, err
+		}
+		migrations = append(migrations, string(content))
+	}
+	return migrations, nil
+}
+
+func main() {
+	if err := godotenv.Load(); err != nil {
+		log.Println("no .env file found, relying on environment variables")
+	}
+
+	cfg := loadConfig()
+	log.Println("configuration loaded")
+
+	db, err := database.NewPostgresDB(database.Config{
+		Host:     cfg.dbHost,
+		Port:     cfg.dbPort,
+		User:     cfg.dbUser,
+		Password: cfg.dbPassword,
+		DBName:   cfg.dbName,
+		SSLMode:  cfg.dbSSLMode,
+	})
+	if err != nil {
+		log.Fatalf("failed to connect to database: %v", err)
+	}
+	log.Println("connected to database")
+
+	migrations, err := readMigrations()
+	if err != nil {
+		log.Fatalf("failed to read migrations: %v", err)
+	}
+	if err := database.RunMigrations(db, migrations); err != nil {
+		log.Fatalf("failed to run migrations: %v", err)
+	}
+	log.Printf("applied %d migration(s)", len(migrations))
+
+	userRepo := repository.NewUserRepository(db)
+	postRepo := repository.NewPostRepository(db)
+	commentRepo := repository.NewCommentRepository(db)
+
+	userService := service.NewUserService(userRepo)
+	postService := service.NewPostService(postRepo, userRepo, commentRepo)
+	commentService := service.NewCommentService(commentRepo, postRepo, userRepo)
+
+	authHandler := handler.NewAuthHandler(userService, cfg.jwtSecret)
+	postHandler := handler.NewPostHandler(postService)
+	commentHandler := handler.NewCommentHandler(commentService)
+
+	router := setupRouter(authHandler, postHandler, commentHandler)
+
+	srv := &http.Server{
+		Addr:         cfg.serverHost + ":" + cfg.serverPort,
+		Handler:      router,
+		ReadTimeout:  15 * time.Second,
+		WriteTimeout: 15 * time.Second,
+		IdleTimeout:  60 * time.Second,
+	}
+
+	go func() {
+		log.Printf("server starting on http://%s", srv.Addr)
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("server error: %v", err)
+		}
+	}()
+
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
+	<-quit
+	log.Println("shutdown signal received")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if err := srv.Shutdown(ctx); err != nil {
+		log.Printf("forced server shutdown: %v", err)
+	}
+
+	if err := db.Close(); err != nil {
+		log.Printf("failed to close database connection: %v", err)
+	}
+
+	log.Println("server stopped cleanly")
+}
+
+func setupRouter(
+	authHandler *handler.AuthHandler,
+	postHandler *handler.PostHandler,
+	commentHandler *handler.CommentHandler,
+) *chi.Mux {
+	r := chi.NewRouter()
+
+	r.Use(middleware.LoggingMiddleware)
+	r.Use(middleware.RecoveryMiddleware)
+	r.Use(middleware.CORSMiddleware)
+
+	r.Route("/api", func(api chi.Router) {
+		// Публичные эндпоинты
+		api.Get("/health", handler.HealthCheckHandler)
+		api.Post("/register", authHandler.RegisterHandler)
+		api.Post("/login", authHandler.LoginHandler)
+
+		api.Get("/posts", postHandler.GetAllPosts)
+		api.Get("/posts/{id}", postHandler.GetPost)
+		api.Get("/users/{authorID}/posts", postHandler.GetPostsByAuthor)
+		api.Get("/posts/{id}/comments", commentHandler.GetCommentsByPostID)
+
+		// Защищенные эндпоинты
+		api.Group(func(protected chi.Router) {
+			protected.Use(middleware.AuthMiddleware)
+
+			protected.Post("/posts", postHandler.CreatePost)
+			protected.Put("/posts/{id}", postHandler.UpdatePost)
+			protected.Delete("/posts/{id}", postHandler.DeletePost)
+
+			protected.Post("/posts/{id}/comments", commentHandler.CreateComment)
+			protected.Put("/comments/{id}", commentHandler.UpdateComment)
+			protected.Delete("/comments/{id}", commentHandler.DeleteComment)
+		})
+	})
+
+	return r
 }
