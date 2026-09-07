@@ -95,6 +95,34 @@ func readMigrations() ([]string, error) {
 	return migrations, nil
 }
 
+const scheduledPostsCheckInterval = 30 * time.Second
+
+// runScheduler периодически публикует черновики, время публикации которых наступило
+// Работает в отдельной горутине до отмены ctx (вызывается при graceful shutdown)
+// ticker.C и ctx.Done() — оба каналы, select между ними — стандартный
+// Go-паттерн ожидания "что наступит раньше"
+func runScheduler(ctx context.Context, postService *service.PostService) {
+	ticker := time.NewTicker(scheduledPostsCheckInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			published, err := postService.PublishScheduledPosts(ctx)
+			if err != nil {
+				log.Printf("scheduler: failed to publish scheduled posts: %v", err)
+				continue
+			}
+			if published > 0 {
+				log.Printf("scheduler: published %d scheduled post(s)", published)
+			}
+		case <-ctx.Done():
+			log.Println("scheduler: stopped")
+			return
+		}
+	}
+}
+
 func main() {
 	if err := godotenv.Load(); err != nil {
 		log.Println("no .env file found, relying on environment variables")
@@ -139,6 +167,9 @@ func main() {
 
 	router := setupRouter(authHandler, postHandler, commentHandler)
 
+	schedulerCtx, stopScheduler := context.WithCancel(context.Background())
+	go runScheduler(schedulerCtx, postService)
+
 	srv := &http.Server{
 		Addr:         cfg.serverHost + ":" + cfg.serverPort,
 		Handler:      router,
@@ -159,6 +190,8 @@ func main() {
 	<-quit
 	log.Println("shutdown signal received")
 
+	stopScheduler()
+	
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 

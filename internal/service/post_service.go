@@ -174,3 +174,30 @@ func (s *PostService) GetPostsCountByAuthor(ctx context.Context, authorID int) (
 	}
 	return count, nil
 }
+
+// PublishScheduledPosts публикует все черновики, время публикации которых уже наступило
+// Не часть исходного TODO этого файла — добавлено для фонового планировщика
+// (см. runScheduler в api/main.go), который периодически вызывает этот метод
+func (s *PostService) PublishScheduledPosts(ctx context.Context) (int, error) {
+	posts, err := s.postRepo.GetScheduledPosts(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get scheduled posts: %w", err)
+	}
+
+	published := 0
+	for _, post := range posts {
+		// Двойная проверка поверх SQL-фильтра GetScheduledPosts: используем
+		// Post.ShouldPublishNow()из internal/model — защита от пограничного случая,
+		// когда publish_at совпадает с моментом выполнения SQL-запроса NOW(),
+		// и даёт этому методу модели реальное применение в коде, а не только в тестах
+		if !post.ShouldPublishNow() {
+			continue
+		}
+		if err := s.postRepo.PublishPost(ctx, post.ID); err != nil {
+			return published, fmt.Errorf("failed to publish post %d: %w", post.ID, err)
+		}
+		published++
+	}
+
+	return published, nil
+}
