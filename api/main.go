@@ -191,7 +191,7 @@ func main() {
 	log.Println("shutdown signal received")
 
 	stopScheduler()
-	
+
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
