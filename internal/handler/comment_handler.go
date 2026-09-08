@@ -52,6 +52,9 @@ func (h *CommentHandler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		h.respondWithError(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
+	// PostID берётся из URL (источник истины), а не из тела запроса — перезаписываем любое значение,
+	// которое клиент мог прислать в теле, прежде чем валидировать всю структуру целиком
+	req.PostID = postID
 	if err := req.Validate(); err != nil {
 		h.respondWithError(w, err.Error(), http.StatusBadRequest)
 		return
