@@ -33,6 +33,9 @@ tmp/
 temp/
 *.tmp
 
+# Deferred action log (created at runtime, see pkg/logger)
+log.txt
+
 # Database
 *.db
 *.sqlite

@@ -6,6 +6,7 @@ import (
 	"advanced-blog-management-system/internal/repository"
 	"advanced-blog-management-system/internal/service"
 	"advanced-blog-management-system/pkg/database"
+	"advanced-blog-management-system/pkg/logger"
 	"context"
 	"log"
 	"net/http"
@@ -33,6 +34,8 @@ type config struct {
 
 	serverHost string
 	serverPort string
+
+	actionLogPath string
 }
 
 func loadConfig() config {
@@ -58,6 +61,8 @@ func loadConfig() config {
 
 		serverHost: getEnv("SERVER_HOST", "0.0.0.0"),
 		serverPort: getEnv("SERVER_PORT", "8080"),
+
+		actionLogPath: getEnv("ACTION_LOG_PATH", "log.txt"),
 	}
 }
 
@@ -153,13 +158,21 @@ func main() {
 	}
 	log.Printf("applied %d migration(s)", len(migrations))
 
+	// actionLogger — отложенное логирование действий пользователя (создание постов/комментариев)
+	// в файл через канал и фоновую горутину-воркер
+	actionLogger, err := logger.New(cfg.actionLogPath)
+	if err != nil {
+		log.Fatalf("failed to init action logger: %v", err)
+	}
+	log.Printf("action logger writing to %s", cfg.actionLogPath)
+
 	userRepo := repository.NewUserRepository(db)
 	postRepo := repository.NewPostRepository(db)
 	commentRepo := repository.NewCommentRepository(db)
 
 	userService := service.NewUserService(userRepo)
-	postService := service.NewPostService(postRepo, userRepo, commentRepo)
-	commentService := service.NewCommentService(commentRepo, postRepo, userRepo)
+	postService := service.NewPostService(postRepo, userRepo, commentRepo, actionLogger)
+	commentService := service.NewCommentService(commentRepo, postRepo, userRepo, actionLogger)
 
 	authHandler := handler.NewAuthHandler(userService, cfg.jwtSecret)
 	postHandler := handler.NewPostHandler(postService)
@@ -197,6 +210,13 @@ func main() {
 
 	if err := srv.Shutdown(ctx); err != nil {
 		log.Printf("forced server shutdown: %v", err)
+	}
+
+	// Close() дожидается, пока воркер-горутина дозапишет в log.txt все события,
+	// которые уже были отправлены в канал до этого момента — поэтому вызываем его
+	// после остановки HTTP-сервера (новых событий уже не будет), но до закрытия БД
+	if err := actionLogger.Close(); err != nil {
+		log.Printf("failed to close action logger: %v", err)
 	}
 
 	if err := db.Close(); err != nil {

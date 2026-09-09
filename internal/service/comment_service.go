@@ -64,7 +64,7 @@ func (s *CommentService) CreateComment(ctx context.Context, req *model.CommentCr
 	}
 
 	s.logAction(fmt.Sprintf("user %d created comment %d", authorID, comment.ID))
-	
+
 	return comment, nil
 }
 
