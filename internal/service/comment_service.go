@@ -17,13 +17,24 @@ type CommentService struct {
 	commentRepo repository.CommentRepository
 	postRepo    repository.PostRepository
 	userRepo    repository.UserRepository
+	// actionLog — отложенный логгер действий пользователя
+	// Может быть nil — тогда вызовы просто пропускаются
+	actionLog ActionLogger
 }
 
-func NewCommentService(commentRepo repository.CommentRepository, postRepo repository.PostRepository, userRepo repository.UserRepository) *CommentService {
+func NewCommentService(commentRepo repository.CommentRepository, postRepo repository.PostRepository, userRepo repository.UserRepository, actionLog ActionLogger) *CommentService {
 	return &CommentService{
 		commentRepo: commentRepo,
 		postRepo:    postRepo,
 		userRepo:    userRepo,
+		actionLog:   actionLog,
+	}
+}
+
+// logAction отправляет событие в отложенный логгер, если он задан
+func (s *CommentService) logAction(event string) {
+	if s.actionLog != nil {
+		s.actionLog.Log(event)
 	}
 }
 
@@ -52,6 +63,8 @@ func (s *CommentService) CreateComment(ctx context.Context, req *model.CommentCr
 		return nil, fmt.Errorf("failed to create comment: %w", err)
 	}
 
+	s.logAction(fmt.Sprintf("user %d created comment %d", authorID, comment.ID))
+	
 	return comment, nil
 }
 

@@ -15,13 +15,24 @@ type PostService struct {
 	postRepo    repository.PostRepository
 	userRepo    repository.UserRepository
 	commentRepo repository.CommentRepository
+	// actionLog — отложенный логгер действий пользователя
+	// Может быть nil - вызовы в этом случае просто пропускаются
+	actionLog ActionLogger
 }
 
-func NewPostService(postRepo repository.PostRepository, userRepo repository.UserRepository, commentRepo repository.CommentRepository) *PostService {
+func NewPostService(postRepo repository.PostRepository, userRepo repository.UserRepository, commentRepo repository.CommentRepository, actionLog ActionLogger) *PostService {
 	return &PostService{
 		postRepo:    postRepo,
 		userRepo:    userRepo,
 		commentRepo: commentRepo,
+		actionLog:   actionLog,
+	}
+}
+
+// logAction отправляет событие в отложенный логгер, если он задан
+func (s *PostService) logAction(event string) {
+	if s.actionLog != nil {
+		s.actionLog.Log(event)
 	}
 }
 
@@ -48,6 +59,8 @@ func (s *PostService) CreatePost(ctx context.Context, req *model.PostCreateReque
 	if err := s.postRepo.Create(ctx, post); err != nil {
 		return nil, fmt.Errorf("failed to create post: %w", err)
 	}
+
+	s.logAction(fmt.Sprintf("user %d created post %d", authorID, post.ID))
 
 	return post, nil
 }
@@ -137,11 +150,11 @@ func (s *PostService) DeletePost(ctx context.Context, id int, userID int) error 
 	return nil
 }
 
-// deleteAllCommentsForPost вычищает все комментарии к посту постранично.
+// deleteAllCommentsForPost вычищает все комментарии к посту постранично
 // offset намеренно всегда 0: после удаления очередной страницы эти строки
 // исчезают из таблицы, и следующий запрос с тем же offset=0 забирает уже
 // новую "первую страницу" оставшихся комментариев — а не пропускает их,
-// как было бы при обычной постраничной навигации по неизменным данным.
+// как было бы при обычной постраничной навигации по неизменным данным
 func (s *PostService) deleteAllCommentsForPost(ctx context.Context, postID int) error {
 	for {
 		comments, err := s.commentRepo.GetByPostID(ctx, postID, commentDeletionPageSize, 0)
