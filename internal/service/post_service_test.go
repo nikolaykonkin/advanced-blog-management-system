@@ -154,6 +154,38 @@ func TestPostService_DeletePost_Owner_DeletesPostAndItsComments(t *testing.T) {
 	assert.Contains(t, commentRepo.comments, 3)
 }
 
+// TestPostService_DeletePost_CommentDeletionExceedsIterationLimit проверяет защиту от бесконечного
+// цикла в deleteAllCommentsForPost: если Delete возвращает nil, реально не удаляя комментарий
+// (см. commentRepo.deleteNoOp), GetByPostID на следующей итерации снова видит ту же самую строку —
+// без предела по количеству итераций цикл продолжался бы вечно
+//
+// commentDeletionPageSize и maxCommentDeletionIterations временно уменьшены именно для этого теста
+// (через defer возвращаются обратно) - иначе пришлось бы реально прогонять цикл 100000 раз
+// только ради того, чтобы проверить, что предел вообще есть
+func TestPostService_DeletePost_CommentDeletionExceedsIterationLimit(t *testing.T) {
+	origPageSize := commentDeletionPageSize
+	origMaxIter := maxCommentDeletionIterations
+	commentDeletionPageSize = 10
+	maxCommentDeletionIterations = 3
+	defer func() {
+		commentDeletionPageSize = origPageSize
+		maxCommentDeletionIterations = origMaxIter
+	}()
+
+	svc, postRepo, commentRepo, _ := newTestPostService()
+	postRepo.posts[1] = &model.Post{ID: 1, AuthorID: 1}
+	commentRepo.comments[1] = &model.Comment{ID: 1, PostID: 1}
+	commentRepo.deleteNoOp = true // Delete "врёт": сообщает об успехе, но ничего не удаляет
+
+	err := svc.DeletePost(context.Background(), 1, 1)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to delete comments for post")
+	// Пост не должен считаться удалённым, если очистка его комментариев
+	// не завершилась успехом — postRepo.Delete вообще не должен вызываться
+	assert.Contains(t, postRepo.posts, 1)
+}
+
 func TestPostService_PublishScheduledPosts_PublishesOnlyDueOnes(t *testing.T) {
 	svc, postRepo, _, _ := newTestPostService()
 	past := time.Now().Add(-1 * time.Hour)
@@ -177,13 +209,44 @@ func TestPostService_PublishScheduledPosts_GetScheduledPostsError_ReturnsError(t
 	assert.Error(t, err)
 }
 
-func TestPostService_PublishScheduledPosts_PublishPostError_ReturnsError(t *testing.T) {
+// TestPostService_PublishScheduledPosts_PublishPostError_ContinuesWithRemaining — переписан:
+// раньше ошибка публикации ОДНОГО поста прерывала весь цикл, и уже готовые к публикации посты
+// после него оставались черновиками до следующего тика планировщика
+// Теперь падение одного поста не должно мешать опубликовать остальные, готовые к публикации
+//
+// Сценарий: три поста, все три реально готовы к публикации (ShouldPublishNow == true у всех),
+// но пост с ID=2 падает при PublishPost
+// Ожидаем: посты 1 и 3 опубликованы (published == 2, оба ID в publishedIDs), пост 2 — нет, а
+// возвращённая ошибка через errors.Is размечена именно про пост 2
+func TestPostService_PublishScheduledPosts_PublishPostError_ContinuesWithRemaining(t *testing.T) {
 	svc, postRepo, _, _ := newTestPostService()
 	past := time.Now().Add(-1 * time.Hour)
 	postRepo.posts[1] = &model.Post{ID: 1, Status: model.PostStatusDraft, PublishAt: &past}
-	postRepo.publishErr = errors.New("update failed")
+	postRepo.posts[2] = &model.Post{ID: 2, Status: model.PostStatusDraft, PublishAt: &past}
+	postRepo.posts[3] = &model.Post{ID: 3, Status: model.PostStatusDraft, PublishAt: &past}
 
-	_, err := svc.PublishScheduledPosts(context.Background())
+	publishErr := errors.New("update failed")
+	postRepo.publishErrByID = map[int]error{2: publishErr}
 
-	assert.Error(t, err)
+	published, err := svc.PublishScheduledPosts(context.Background())
+
+	assert.Equal(t, 2, published, "посты 1 и 3 должны опубликоваться несмотря на сбой поста 2")
+	require.Error(t, err)
+	assert.ErrorIs(t, err, publishErr, "объединённая ошибка должна содержать исходную ошибку по посту 2")
+	assert.ElementsMatch(t, []int{1, 3}, postRepo.publishedIDs)
+}
+
+// TestPostService_PublishScheduledPosts_AllPublishPostErrors_ReturnsZeroPublished —
+// граничный случай предыдущего теста: если падают ВСЕ посты, published должен
+// быть 0, а не "частично успешным" ложным нулём, полученным по случайности
+func TestPostService_PublishScheduledPosts_AllPublishPostErrors_ReturnsZeroPublished(t *testing.T) {
+	svc, postRepo, _, _ := newTestPostService()
+	past := time.Now().Add(-1 * time.Hour)
+	postRepo.posts[1] = &model.Post{ID: 1, Status: model.PostStatusDraft, PublishAt: &past}
+	postRepo.publishErr = errors.New("db unavailable")
+
+	published, err := svc.PublishScheduledPosts(context.Background())
+
+	assert.Equal(t, 0, published)
+	require.Error(t, err)
 }

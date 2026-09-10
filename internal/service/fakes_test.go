@@ -88,8 +88,14 @@ type fakePostRepository struct {
 	getScheduledErr error
 	publishErr      error
 
-	// publishedIDs фиксирует, для каких постов реально вызывался PublishPost -
-	// используется тестами PublishScheduledPosts, чтобы проверить не только итоговый счётчик,
+	// publishErrByID — ошибка PublishPost для КОНКРЕТНОГО id поста, в отличие от publishErr
+	// (падает на любом посте) - нужна, чтобы протестировать PublishScheduledPosts сочетание
+	// "один пост не публикуется, остальные должны опубликоваться всё равно" — с одним общим publishErr
+	// такой сценарий не собрать, он либо отключён (nil), либо валит вообще все
+	publishErrByID map[int]error
+
+	// publishedIDs фиксирует, для каких постов реально вызывался PublishPost - используется тестами
+	// PublishScheduledPosts, чтобы проверить не только итоговый счетчик,
 	// но и то, какие именно посты были опубликованы
 	publishedIDs []int
 }
@@ -161,6 +167,9 @@ func (r *fakePostRepository) GetScheduledPosts(ctx context.Context) ([]*model.Po
 }
 
 func (r *fakePostRepository) PublishPost(ctx context.Context, id int) error {
+	if err, ok := r.publishErrByID[id]; ok {
+		return err
+	}
 	if r.publishErr != nil {
 		return r.publishErr
 	}
@@ -181,6 +190,14 @@ type fakeCommentRepository struct {
 	nextID   int
 
 	getByPostIDErr error
+
+	// deleteNoOp — если true, Delete "врёт": возвращает nil, но комментарий
+	// из comments не удаляет. Единственная цель — воспроизвести в тесте
+	// сценарий, для которого в deleteAllCommentsForPost стоит защита от
+	// бесконечного цикла (см. maxCommentDeletionIterations в post_service.go):
+	// такое поведение реального Delete в этом проекте не ожидается,
+	// но тест должен это проверять, а не полагаться на то, что "такого не бывает"
+	deleteNoOp bool
 }
 
 func newFakeCommentRepository() *fakeCommentRepository {
@@ -230,6 +247,9 @@ func (r *fakeCommentRepository) Update(ctx context.Context, comment *model.Comme
 }
 
 func (r *fakeCommentRepository) Delete(ctx context.Context, id int) error {
+	if r.deleteNoOp {
+		return nil
+	}
 	delete(r.comments, id)
 	return nil
 }
