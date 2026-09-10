@@ -68,7 +68,7 @@ type PostCreateRequest struct {
 type PostUpdateRequest struct {
 	Title     string     `json:"title" validate:"required,min=1,max=200"`
 	Content   string     `json:"content" validate:"required,min=1"`
-	Status    string     `json:"status,omitempty"`
+	Status    string     `json:"status,omitempty" validate:"omitempty,oneof=draft published"`
 	PublishAt *time.Time `json:"publish_at,omitempty"`
 }
 

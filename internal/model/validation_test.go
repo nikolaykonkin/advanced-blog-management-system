@@ -92,6 +92,10 @@ func TestPostUpdateRequest_Validate(t *testing.T) {
 		{"empty title", PostUpdateRequest{Title: "", Content: "Content"}, true},
 		{"title too long", PostUpdateRequest{Title: strings.Repeat("a", 201), Content: "Content"}, true},
 		{"empty content", PostUpdateRequest{Title: "Title", Content: ""}, true},
+		{"empty status is allowed (omitempty)", PostUpdateRequest{Title: "Title", Content: "Content", Status: ""}, false},
+		{"status draft is valid", PostUpdateRequest{Title: "Title", Content: "Content", Status: PostStatusDraft}, false},
+		{"status published is valid", PostUpdateRequest{Title: "Title", Content: "Content", Status: PostStatusPublished}, false},
+		{"unknown status is rejected", PostUpdateRequest{Title: "Title", Content: "Content", Status: "garbage"}, true},
 	}
 
 	for _, tt := range tests {
