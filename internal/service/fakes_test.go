@@ -77,3 +77,173 @@ func (r *fakeUserRepository) Delete(ctx context.Context, id int) error {
 // Компиляционная проверка: fakeUserRepository должен реализовывать весь интерфейс
 // repository.UserRepository, а не только методы, используемые в текущих тестах
 var _ repository.UserRepository = (*fakeUserRepository)(nil)
+
+// fakePostRepository - минимальная in-memory реализация repository.PostRepository
+// для юнит-тестов PostService
+type fakePostRepository struct {
+	posts  map[int]*model.Post
+	nextID int
+
+	getByIDErr      error
+	getScheduledErr error
+	publishErr      error
+
+	// publishedIDs фиксирует, для каких постов реально вызывался PublishPost -
+	// используется тестами PublishScheduledPosts, чтобы проверить не только итоговый счётчик,
+	// но и то, какие именно посты были опубликованы
+	publishedIDs []int
+}
+
+func newFakePostRepository() *fakePostRepository {
+	return &fakePostRepository{posts: make(map[int]*model.Post)}
+}
+
+func (r *fakePostRepository) Create(ctx context.Context, post *model.Post) error {
+	r.nextID++
+	post.ID = r.nextID
+	r.posts[post.ID] = post
+	return nil
+}
+
+func (r *fakePostRepository) GetByID(ctx context.Context, id int) (*model.Post, error) {
+	if r.getByIDErr != nil {
+		return nil, r.getByIDErr
+	}
+	return r.posts[id], nil
+}
+
+func (r *fakePostRepository) GetAll(ctx context.Context, limit, offset int) ([]*model.Post, error) {
+	return nil, nil
+}
+
+func (r *fakePostRepository) GetTotalCount(ctx context.Context) (int, error) {
+	return len(r.posts), nil
+}
+
+func (r *fakePostRepository) Update(ctx context.Context, post *model.Post) error {
+	r.posts[post.ID] = post
+	return nil
+}
+
+func (r *fakePostRepository) Delete(ctx context.Context, id int) error {
+	delete(r.posts, id)
+	return nil
+}
+
+func (r *fakePostRepository) Exists(ctx context.Context, id int) (bool, error) {
+	_, ok := r.posts[id]
+	return ok, nil
+}
+
+func (r *fakePostRepository) GetByAuthorID(ctx context.Context, authorID int, limit, offset int) ([]*model.Post, error) {
+	return nil, nil
+}
+
+func (r *fakePostRepository) GetTotalCountByAuthorID(ctx context.Context, authorID int) (int, error) {
+	return 0, nil
+}
+
+// GetScheduledPosts намеренно возвращает ВСЕ черновики с установленным PublishAt,
+// без фильтрации по времени - в реальной БД эту фильтрацию делает SQL (WHERE publish_at <= NOW())
+// Так тест реально проверяет защитную проверку post.ShouldPublishNow() внутри самого сервиса
+// (см. комментарий к PublishScheduledPosts), а не полагается на фейк
+func (r *fakePostRepository) GetScheduledPosts(ctx context.Context) ([]*model.Post, error) {
+	if r.getScheduledErr != nil {
+		return nil, r.getScheduledErr
+	}
+	var scheduled []*model.Post
+	for _, p := range r.posts {
+		if p.Status == model.PostStatusDraft && p.PublishAt != nil {
+			scheduled = append(scheduled, p)
+		}
+	}
+	return scheduled, nil
+}
+
+func (r *fakePostRepository) PublishPost(ctx context.Context, id int) error {
+	if r.publishErr != nil {
+		return r.publishErr
+	}
+	r.publishedIDs = append(r.publishedIDs, id)
+	if post, ok := r.posts[id]; ok {
+		post.Status = model.PostStatusPublished
+		post.PublishAt = nil
+	}
+	return nil
+}
+
+var _ repository.PostRepository = (*fakePostRepository)(nil)
+
+// fakeCommentRepository - минимальная in-memory реализация
+// repository.CommentRepository для юнит-тестов PostService/CommentService
+type fakeCommentRepository struct {
+	comments map[int]*model.Comment
+	nextID   int
+
+	getByPostIDErr error
+}
+
+func newFakeCommentRepository() *fakeCommentRepository {
+	return &fakeCommentRepository{comments: make(map[int]*model.Comment)}
+}
+
+func (r *fakeCommentRepository) Create(ctx context.Context, comment *model.Comment) error {
+	r.nextID++
+	comment.ID = r.nextID
+	r.comments[comment.ID] = comment
+	return nil
+}
+
+func (r *fakeCommentRepository) GetByID(ctx context.Context, id int) (*model.Comment, error) {
+	return r.comments[id], nil
+}
+
+func (r *fakeCommentRepository) GetByPostID(ctx context.Context, postID int, limit, offset int) ([]*model.Comment, error) {
+	if r.getByPostIDErr != nil {
+		return nil, r.getByPostIDErr
+	}
+	var result []*model.Comment
+	for _, c := range r.comments {
+		if c.PostID == postID {
+			result = append(result, c)
+			if len(result) >= limit {
+				break
+			}
+		}
+	}
+	return result, nil
+}
+
+func (r *fakeCommentRepository) GetCountByPostID(ctx context.Context, postID int) (int, error) {
+	count := 0
+	for _, c := range r.comments {
+		if c.PostID == postID {
+			count++
+		}
+	}
+	return count, nil
+}
+
+func (r *fakeCommentRepository) Update(ctx context.Context, comment *model.Comment) error {
+	r.comments[comment.ID] = comment
+	return nil
+}
+
+func (r *fakeCommentRepository) Delete(ctx context.Context, id int) error {
+	delete(r.comments, id)
+	return nil
+}
+
+var _ repository.CommentRepository = (*fakeCommentRepository)(nil)
+
+// fakeActionLogger записывает все переданные ему события в срез -
+// тесты проверяют его содержимое вместо чтения настоящего файла
+type fakeActionLogger struct {
+	events []string
+}
+
+func (l *fakeActionLogger) Log(event string) {
+	l.events = append(l.events, event)
+}
+
+var _ ActionLogger = (*fakeActionLogger)(nil)
