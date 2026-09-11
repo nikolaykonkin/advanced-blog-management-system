@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"sort"
 	"testing"
 
 	"advanced-blog-management-system/internal/model"
@@ -20,7 +21,7 @@ type fakeUserRepository struct {
 
 	// createErr, если задан, возвращается из Create вместо реальной вставки -
 	// используется для симуляции гонки на уровне БД (два параллельных запроса
-	// проходят проверку ExistsByEmail/Username, но Create все равно падает с ErrDuplicateUser)
+	// проходят проверку ExistsByEmail/Username, но Create всё равно падает с ErrDuplicateUser)
 	createErr           error
 	getByIDErr          error
 	getByEmailErr       error
@@ -115,11 +116,11 @@ type fakePostRepository struct {
 	posts  map[int]*model.Post
 	nextID int
 
-	getByIDErr      error
-	getScheduledErr error
-	publishErr      error
-	createErr       error
-	getAllErr       error
+	getByIDErr                 error
+	getScheduledErr            error
+	publishErr                 error
+	createErr                  error
+	getAllErr                  error
 	getTotalCountErr           error
 	updateErr                  error
 	deleteErr                  error
@@ -129,7 +130,7 @@ type fakePostRepository struct {
 
 	// publishErrByID — ошибка PublishPost для КОНКРЕТНОГО id поста, в отличие от publishErr
 	// (падает на любом посте) - нужна, чтобы протестировать PublishScheduledPosts сочетание
-	// "один пост не публикуется, остальные должны опубликоваться всё равно" — с одним общим publishErr
+	// "один пост не публикуется, остальные должны опубликоваться все равно" — с одним общим publishErr
 	// такой сценарий не собрать, он либо отключён (nil), либо валит вообще все
 	publishErrByID map[int]error
 
@@ -307,16 +308,24 @@ func (r *fakeCommentRepository) GetByPostID(ctx context.Context, postID int, lim
 	if r.getByPostIDErr != nil {
 		return nil, r.getByPostIDErr
 	}
-	var result []*model.Comment
+	var matched []*model.Comment
 	for _, c := range r.comments {
 		if c.PostID == postID {
-			result = append(result, c)
-			if len(result) >= limit {
-				break
-			}
+			matched = append(matched, c)
 		}
 	}
-	return result, nil
+	// порядок карты в Go не гарантирован, а без стабильной сортировки offset вообще не имеет смысла -
+	// "первые N после offset" должны быть теми же N при каждом вызове
+	sort.Slice(matched, func(i, j int) bool { return matched[i].ID < matched[j].ID })
+
+	if offset >= len(matched) {
+		return []*model.Comment{}, nil
+	}
+	end := offset + limit
+	if end > len(matched) {
+		end = len(matched)
+	}
+	return matched[offset:end], nil
 }
 
 func (r *fakeCommentRepository) GetCountByPostID(ctx context.Context, postID int) (int, error) {
@@ -365,10 +374,9 @@ func (l *fakeActionLogger) Log(event string) {
 
 var _ ActionLogger = (*fakeActionLogger)(nil)
 
-// сама фейковая реализация тоже нуждается в тесте: Update и Delete раньше
-// синхронизировали только byID, оставляя старые email/username висеть в
-// byEmail/byUsername - ни один тест это не ловил, так как UserService
-// сейчас вообще не вызывает Update/Delete, но фикс без теста не защитит
+// сама фейковая реализация тоже нуждается в тесте: Update и Delete раньше синхронизировали
+// только byID, оставляя старые email/username висеть в byEmail/byUsername - ни один тест это не ловил,
+// так как UserService сейчас вообще не вызывает Update/Delete, но фикс без теста не защитит
 // от регрессии, если такой метод появится в будущем
 
 func TestFakeUserRepository_Update_SyncsAllIndexes(t *testing.T) {
@@ -408,4 +416,40 @@ func TestFakeUserRepository_Delete_ClearsAllIndexes(t *testing.T) {
 	assert.Nil(t, byEmail)
 	assert.Nil(t, byUsername)
 	assert.Nil(t, byID)
+}
+
+func TestFakeCommentRepository_GetByPostID_HonorsOffset(t *testing.T) {
+	repo := newFakeCommentRepository()
+	for i := 1; i <= 5; i++ {
+		repo.comments[i] = &model.Comment{ID: i, PostID: 1}
+	}
+
+	page1, err := repo.GetByPostID(context.Background(), 1, 2, 0)
+	assert.NoError(t, err)
+	page2, err := repo.GetByPostID(context.Background(), 1, 2, 2)
+	assert.NoError(t, err)
+	page3, err := repo.GetByPostID(context.Background(), 1, 2, 4)
+	assert.NoError(t, err)
+
+	assert.Equal(t, []int{1, 2}, commentIDs(page1))
+	assert.Equal(t, []int{3, 4}, commentIDs(page2))
+	assert.Equal(t, []int{5}, commentIDs(page3))
+}
+
+func TestFakeCommentRepository_GetByPostID_OffsetPastEnd_ReturnsEmpty(t *testing.T) {
+	repo := newFakeCommentRepository()
+	repo.comments[1] = &model.Comment{ID: 1, PostID: 1}
+
+	page, err := repo.GetByPostID(context.Background(), 1, 10, 100)
+
+	assert.NoError(t, err)
+	assert.Empty(t, page)
+}
+
+func commentIDs(comments []*model.Comment) []int {
+	ids := make([]int, len(comments))
+	for i, c := range comments {
+		ids[i] = c.ID
+	}
+	return ids
 }
