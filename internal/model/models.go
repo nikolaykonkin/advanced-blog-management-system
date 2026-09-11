@@ -73,9 +73,9 @@ type PostUpdateRequest struct {
 }
 
 // CommentCreateRequest представляет запрос на создание комментария
+// post_id намеренно отсутствует - он приходит из URL, а не из тела запроса
 type CommentCreateRequest struct {
 	Content string `json:"content" validate:"required,min=1,max=1000"`
-	PostID  int    `json:"post_id" validate:"required,gt=0"`
 }
 
 // CommentUpdateRequest представляет запрос на обновление комментария

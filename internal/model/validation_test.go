@@ -116,11 +116,9 @@ func TestCommentCreateRequest_Validate(t *testing.T) {
 		req     CommentCreateRequest
 		wantErr bool
 	}{
-		{"valid request", CommentCreateRequest{Content: "Nice post!", PostID: 1}, false},
-		{"empty content", CommentCreateRequest{Content: "", PostID: 1}, true},
-		{"content too long", CommentCreateRequest{Content: strings.Repeat("a", 1001), PostID: 1}, true},
-		{"zero post id", CommentCreateRequest{Content: "Nice post!", PostID: 0}, true},
-		{"negative post id", CommentCreateRequest{Content: "Nice post!", PostID: -1}, true},
+		{"valid request", CommentCreateRequest{Content: "Nice post!"}, false},
+		{"empty content", CommentCreateRequest{Content: ""}, true},
+		{"content too long", CommentCreateRequest{Content: strings.Repeat("a", 1001)}, true},
 	}
 
 	for _, tt := range tests {

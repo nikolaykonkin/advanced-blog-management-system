@@ -21,15 +21,14 @@ func newTestCommentService() (*CommentService, *fakePostRepository, *fakeComment
 	return svc, postRepo, commentRepo, logger
 }
 
-// CreateComment принимает postID отдельным параметром (его выставляет хендлер из URL)
-// и не читает req.PostID для логики - но req.Validate() все равно требует req.PostID > 0,
-// поэтому в тестах его нужно проставлять руками, как это в реальном запросе делает хендлер
+// postID приходит отдельным параметром из URL (/posts/{id}/comments),
+// а не из тела запроса — CommentCreateRequest его не содержит
 
 func TestCommentService_CreateComment_Success(t *testing.T) {
 	svc, postRepo, _, _ := newTestCommentService()
 	postRepo.posts[1] = &model.Post{ID: 1, Status: model.PostStatusPublished}
 
-	comment, err := svc.CreateComment(context.Background(), &model.CommentCreateRequest{Content: "Nice post!", PostID: 1}, 1, 5)
+	comment, err := svc.CreateComment(context.Background(), &model.CommentCreateRequest{Content: "Nice post!"}, 1, 5)
 
 	require.NoError(t, err)
 	assert.Equal(t, "Nice post!", comment.Content)
@@ -40,7 +39,7 @@ func TestCommentService_CreateComment_Success(t *testing.T) {
 func TestCommentService_CreateComment_PostNotFound_ReturnsErrPostNotFound(t *testing.T) {
 	svc, _, _, _ := newTestCommentService()
 
-	_, err := svc.CreateComment(context.Background(), &model.CommentCreateRequest{Content: "Nice post!", PostID: 999}, 999, 5)
+	_, err := svc.CreateComment(context.Background(), &model.CommentCreateRequest{Content: "Nice post!"}, 999, 5)
 
 	assert.ErrorIs(t, err, apperrors.ErrPostNotFound)
 }
@@ -49,7 +48,7 @@ func TestCommentService_CreateComment_PostNotPublished_ReturnsErrPostNotPublishe
 	svc, postRepo, _, _ := newTestCommentService()
 	postRepo.posts[1] = &model.Post{ID: 1, Status: model.PostStatusDraft}
 
-	_, err := svc.CreateComment(context.Background(), &model.CommentCreateRequest{Content: "Nice post!", PostID: 1}, 1, 5)
+	_, err := svc.CreateComment(context.Background(), &model.CommentCreateRequest{Content: "Nice post!"}, 1, 5)
 
 	assert.ErrorIs(t, err, ErrPostNotPublished)
 }
@@ -58,7 +57,7 @@ func TestCommentService_CreateComment_InvalidRequest_ReturnsValidationError(t *t
 	svc, postRepo, _, _ := newTestCommentService()
 	postRepo.posts[1] = &model.Post{ID: 1, Status: model.PostStatusPublished}
 
-	_, err := svc.CreateComment(context.Background(), &model.CommentCreateRequest{Content: "", PostID: 1}, 1, 5)
+	_, err := svc.CreateComment(context.Background(), &model.CommentCreateRequest{Content: ""}, 1, 5)
 
 	assert.Error(t, err)
 }
@@ -67,7 +66,7 @@ func TestCommentService_CreateComment_LogsActionEvent(t *testing.T) {
 	svc, postRepo, _, logger := newTestCommentService()
 	postRepo.posts[1] = &model.Post{ID: 1, Status: model.PostStatusPublished}
 
-	comment, err := svc.CreateComment(context.Background(), &model.CommentCreateRequest{Content: "Nice post!", PostID: 1}, 1, 7)
+	comment, err := svc.CreateComment(context.Background(), &model.CommentCreateRequest{Content: "Nice post!"}, 1, 7)
 	require.NoError(t, err)
 
 	require.Len(t, logger.events, 1)
