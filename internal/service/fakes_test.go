@@ -20,8 +20,12 @@ type fakeUserRepository struct {
 
 	// createErr, если задан, возвращается из Create вместо реальной вставки -
 	// используется для симуляции гонки на уровне БД (два параллельных запроса
-	// проходят проверку ExistsByEmail/Username, но Create всё равно падает с ErrDuplicateUser)
-	createErr error
+	// проходят проверку ExistsByEmail/Username, но Create все равно падает с ErrDuplicateUser)
+	createErr           error
+	getByIDErr          error
+	getByEmailErr       error
+	existsByEmailErr    error
+	existsByUsernameErr error
 }
 
 func newFakeUserRepository() *fakeUserRepository {
@@ -46,10 +50,16 @@ func (r *fakeUserRepository) Create(ctx context.Context, user *model.User) error
 }
 
 func (r *fakeUserRepository) GetByID(ctx context.Context, id int) (*model.User, error) {
+	if r.getByIDErr != nil {
+		return nil, r.getByIDErr
+	}
 	return r.byID[id], nil
 }
 
 func (r *fakeUserRepository) GetByEmail(ctx context.Context, email string) (*model.User, error) {
+	if r.getByEmailErr != nil {
+		return nil, r.getByEmailErr
+	}
 	return r.byEmail[email], nil
 }
 
@@ -58,11 +68,17 @@ func (r *fakeUserRepository) GetByUsername(ctx context.Context, username string)
 }
 
 func (r *fakeUserRepository) ExistsByEmail(ctx context.Context, email string) (bool, error) {
+	if r.existsByEmailErr != nil {
+		return false, r.existsByEmailErr
+	}
 	_, ok := r.byEmail[email]
 	return ok, nil
 }
 
 func (r *fakeUserRepository) ExistsByUsername(ctx context.Context, username string) (bool, error) {
+	if r.existsByUsernameErr != nil {
+		return false, r.existsByUsernameErr
+	}
 	_, ok := r.byUsername[username]
 	return ok, nil
 }
@@ -102,6 +118,14 @@ type fakePostRepository struct {
 	getByIDErr      error
 	getScheduledErr error
 	publishErr      error
+	createErr       error
+	getAllErr       error
+	getTotalCountErr           error
+	updateErr                  error
+	deleteErr                  error
+	existsErr                  error
+	getByAuthorIDErr           error
+	getTotalCountByAuthorIDErr error
 
 	// publishErrByID — ошибка PublishPost для КОНКРЕТНОГО id поста, в отличие от publishErr
 	// (падает на любом посте) - нужна, чтобы протестировать PublishScheduledPosts сочетание
@@ -120,6 +144,9 @@ func newFakePostRepository() *fakePostRepository {
 }
 
 func (r *fakePostRepository) Create(ctx context.Context, post *model.Post) error {
+	if r.createErr != nil {
+		return r.createErr
+	}
 	r.nextID++
 	post.ID = r.nextID
 	r.posts[post.ID] = post
@@ -134,34 +161,71 @@ func (r *fakePostRepository) GetByID(ctx context.Context, id int) (*model.Post, 
 }
 
 func (r *fakePostRepository) GetAll(ctx context.Context, limit, offset int) ([]*model.Post, error) {
-	return nil, nil
+	if r.getAllErr != nil {
+		return nil, r.getAllErr
+	}
+	var result []*model.Post
+	for _, p := range r.posts {
+		result = append(result, p)
+	}
+	return result, nil
 }
 
 func (r *fakePostRepository) GetTotalCount(ctx context.Context) (int, error) {
+	if r.getTotalCountErr != nil {
+		return 0, r.getTotalCountErr
+	}
 	return len(r.posts), nil
 }
 
 func (r *fakePostRepository) Update(ctx context.Context, post *model.Post) error {
+	if r.updateErr != nil {
+		return r.updateErr
+	}
 	r.posts[post.ID] = post
 	return nil
 }
 
 func (r *fakePostRepository) Delete(ctx context.Context, id int) error {
+	if r.deleteErr != nil {
+		return r.deleteErr
+	}
 	delete(r.posts, id)
 	return nil
 }
 
 func (r *fakePostRepository) Exists(ctx context.Context, id int) (bool, error) {
+	if r.existsErr != nil {
+		return false, r.existsErr
+	}
 	_, ok := r.posts[id]
 	return ok, nil
 }
 
 func (r *fakePostRepository) GetByAuthorID(ctx context.Context, authorID int, limit, offset int) ([]*model.Post, error) {
-	return nil, nil
+	if r.getByAuthorIDErr != nil {
+		return nil, r.getByAuthorIDErr
+	}
+	var result []*model.Post
+	for _, p := range r.posts {
+		if p.AuthorID == authorID {
+			result = append(result, p)
+		}
+	}
+	return result, nil
 }
 
 func (r *fakePostRepository) GetTotalCountByAuthorID(ctx context.Context, authorID int) (int, error) {
-	return 0, nil
+	if r.getTotalCountByAuthorIDErr != nil {
+		return 0, r.getTotalCountByAuthorIDErr
+	}
+	count := 0
+	for _, p := range r.posts {
+		if p.AuthorID == authorID {
+			count++
+		}
+	}
+	return count, nil
 }
 
 // GetScheduledPosts намеренно возвращает ВСЕ черновики с установленным PublishAt,
@@ -204,14 +268,17 @@ type fakeCommentRepository struct {
 	comments map[int]*model.Comment
 	nextID   int
 
-	getByPostIDErr error
+	getByPostIDErr      error
+	createErr           error
+	getByIDErr          error
+	getCountByPostIDErr error
+	updateErr           error
+	deleteErr           error
 
-	// deleteNoOp — если true, Delete "врёт": возвращает nil, но комментарий
-	// из comments не удаляет. Единственная цель — воспроизвести в тесте
-	// сценарий, для которого в deleteAllCommentsForPost стоит защита от
-	// бесконечного цикла (см. maxCommentDeletionIterations в post_service.go):
-	// такое поведение реального Delete в этом проекте не ожидается,
-	// но тест должен это проверять, а не полагаться на то, что "такого не бывает"
+	// deleteNoOp — если true, Delete "врёт": возвращает nil, но комментарий из comments не удаляет
+	// Единственная цель — воспроизвести в тесте сценарий, для которого в deleteAllCommentsForPost стоит
+	// защита от бесконечного цикла (см. maxCommentDeletionIterations в post_service.go): такое поведение
+	// реального Delete в этом проекте не ожидается, но тест должен это проверять
 	deleteNoOp bool
 }
 
@@ -220,6 +287,9 @@ func newFakeCommentRepository() *fakeCommentRepository {
 }
 
 func (r *fakeCommentRepository) Create(ctx context.Context, comment *model.Comment) error {
+	if r.createErr != nil {
+		return r.createErr
+	}
 	r.nextID++
 	comment.ID = r.nextID
 	r.comments[comment.ID] = comment
@@ -227,6 +297,9 @@ func (r *fakeCommentRepository) Create(ctx context.Context, comment *model.Comme
 }
 
 func (r *fakeCommentRepository) GetByID(ctx context.Context, id int) (*model.Comment, error) {
+	if r.getByIDErr != nil {
+		return nil, r.getByIDErr
+	}
 	return r.comments[id], nil
 }
 
@@ -247,6 +320,9 @@ func (r *fakeCommentRepository) GetByPostID(ctx context.Context, postID int, lim
 }
 
 func (r *fakeCommentRepository) GetCountByPostID(ctx context.Context, postID int) (int, error) {
+	if r.getCountByPostIDErr != nil {
+		return 0, r.getCountByPostIDErr
+	}
 	count := 0
 	for _, c := range r.comments {
 		if c.PostID == postID {
@@ -257,11 +333,17 @@ func (r *fakeCommentRepository) GetCountByPostID(ctx context.Context, postID int
 }
 
 func (r *fakeCommentRepository) Update(ctx context.Context, comment *model.Comment) error {
+	if r.updateErr != nil {
+		return r.updateErr
+	}
 	r.comments[comment.ID] = comment
 	return nil
 }
 
 func (r *fakeCommentRepository) Delete(ctx context.Context, id int) error {
+	if r.deleteErr != nil {
+		return r.deleteErr
+	}
 	if r.deleteNoOp {
 		return nil
 	}
@@ -283,9 +365,10 @@ func (l *fakeActionLogger) Log(event string) {
 
 var _ ActionLogger = (*fakeActionLogger)(nil)
 
-// сама фейковая реализация тоже нуждается в тесте: Update и Delete раньше синхронизировали
-// только byID, оставляя старые email/username висеть в byEmail/byUsername - ни один тест это не ловил,
-// так как UserService сейчас вообще не вызывает Update/Delete, но фикс без теста не защитит
+// сама фейковая реализация тоже нуждается в тесте: Update и Delete раньше
+// синхронизировали только byID, оставляя старые email/username висеть в
+// byEmail/byUsername - ни один тест это не ловил, так как UserService
+// сейчас вообще не вызывает Update/Delete, но фикс без теста не защитит
 // от регрессии, если такой метод появится в будущем
 
 func TestFakeUserRepository_Update_SyncsAllIndexes(t *testing.T) {

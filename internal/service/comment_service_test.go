@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 
@@ -21,8 +22,8 @@ func newTestCommentService() (*CommentService, *fakePostRepository, *fakeComment
 	return svc, postRepo, commentRepo, logger
 }
 
-// postID приходит отдельным параметром из URL (/posts/{id}/comments),
-// а не из тела запроса — CommentCreateRequest его не содержит
+// CreateComment принимает postID отдельным параметром - его выставляет хендлер из URL,
+// в теле запроса post_id вообще отсутствует
 
 func TestCommentService_CreateComment_Success(t *testing.T) {
 	svc, postRepo, _, _ := newTestCommentService()
@@ -73,12 +74,40 @@ func TestCommentService_CreateComment_LogsActionEvent(t *testing.T) {
 	assert.Equal(t, fmt.Sprintf("user 7 created comment %d", comment.ID), logger.events[0])
 }
 
+func TestCommentService_CreateComment_GetPostRepoError_ReturnsError(t *testing.T) {
+	svc, postRepo, _, _ := newTestCommentService()
+	postRepo.getByIDErr = errors.New("db unavailable")
+
+	_, err := svc.CreateComment(context.Background(), &model.CommentCreateRequest{Content: "Nice post!"}, 1, 5)
+
+	assert.Error(t, err)
+}
+
+func TestCommentService_CreateComment_CreateRepoError_ReturnsError(t *testing.T) {
+	svc, postRepo, commentRepo, _ := newTestCommentService()
+	postRepo.posts[1] = &model.Post{ID: 1, Status: model.PostStatusPublished}
+	commentRepo.createErr = errors.New("disk full")
+
+	_, err := svc.CreateComment(context.Background(), &model.CommentCreateRequest{Content: "Nice post!"}, 1, 5)
+
+	assert.Error(t, err)
+}
+
 func TestCommentService_GetComment_NotFound_ReturnsErrCommentNotFound(t *testing.T) {
 	svc, _, _, _ := newTestCommentService()
 
 	_, err := svc.GetComment(context.Background(), 999)
 
 	assert.ErrorIs(t, err, apperrors.ErrCommentNotFound)
+}
+
+func TestCommentService_GetComment_RepoError_ReturnsError(t *testing.T) {
+	svc, _, commentRepo, _ := newTestCommentService()
+	commentRepo.getByIDErr = errors.New("db unavailable")
+
+	_, err := svc.GetComment(context.Background(), 1)
+
+	assert.Error(t, err)
 }
 
 func TestCommentService_GetCommentsByPostID_PostNotFound_ReturnsErrPostNotFound(t *testing.T) {
@@ -100,6 +129,46 @@ func TestCommentService_GetCommentsByPostID_Success(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, comments, 1)
 	assert.Equal(t, "First", comments[0].Content)
+}
+
+func TestCommentService_GetCommentsByPostID_ExistsRepoError_ReturnsError(t *testing.T) {
+	svc, postRepo, _, _ := newTestCommentService()
+	postRepo.existsErr = errors.New("db unavailable")
+
+	_, err := svc.GetCommentsByPostID(context.Background(), 1, 10, 0)
+
+	assert.Error(t, err)
+}
+
+func TestCommentService_GetCommentsByPostID_GetByPostIDRepoError_ReturnsError(t *testing.T) {
+	svc, postRepo, commentRepo, _ := newTestCommentService()
+	postRepo.posts[1] = &model.Post{ID: 1, Status: model.PostStatusPublished}
+	commentRepo.getByPostIDErr = errors.New("db unavailable")
+
+	_, err := svc.GetCommentsByPostID(context.Background(), 1, 10, 0)
+
+	assert.Error(t, err)
+}
+
+func TestCommentService_GetCommentsCountByPostID_Success(t *testing.T) {
+	svc, _, commentRepo, _ := newTestCommentService()
+	commentRepo.comments[1] = &model.Comment{ID: 1, PostID: 1}
+	commentRepo.comments[2] = &model.Comment{ID: 2, PostID: 1}
+	commentRepo.comments[3] = &model.Comment{ID: 3, PostID: 2}
+
+	count, err := svc.GetCommentsCountByPostID(context.Background(), 1)
+
+	require.NoError(t, err)
+	assert.Equal(t, 2, count)
+}
+
+func TestCommentService_GetCommentsCountByPostID_RepoError_ReturnsError(t *testing.T) {
+	svc, _, commentRepo, _ := newTestCommentService()
+	commentRepo.getCountByPostIDErr = errors.New("db unavailable")
+
+	_, err := svc.GetCommentsCountByPostID(context.Background(), 1)
+
+	assert.Error(t, err)
 }
 
 func TestCommentService_UpdateComment_NotOwner_ReturnsErrForbidden(t *testing.T) {
@@ -138,6 +207,25 @@ func TestCommentService_UpdateComment_InvalidRequest_ReturnsValidationError(t *t
 	assert.Error(t, err)
 }
 
+func TestCommentService_UpdateComment_RepoGetByIDError_ReturnsError(t *testing.T) {
+	svc, _, commentRepo, _ := newTestCommentService()
+	commentRepo.getByIDErr = errors.New("db unavailable")
+
+	_, err := svc.UpdateComment(context.Background(), 1, &model.CommentUpdateRequest{Content: "New"}, 1)
+
+	assert.Error(t, err)
+}
+
+func TestCommentService_UpdateComment_RepoUpdateError_ReturnsError(t *testing.T) {
+	svc, _, commentRepo, _ := newTestCommentService()
+	commentRepo.comments[1] = &model.Comment{ID: 1, AuthorID: 1, Content: "Old"}
+	commentRepo.updateErr = errors.New("disk full")
+
+	_, err := svc.UpdateComment(context.Background(), 1, &model.CommentUpdateRequest{Content: "New"}, 1)
+
+	assert.Error(t, err)
+}
+
 func TestCommentService_DeleteComment_NotOwner_ReturnsErrForbidden(t *testing.T) {
 	svc, _, commentRepo, _ := newTestCommentService()
 	commentRepo.comments[1] = &model.Comment{ID: 1, AuthorID: 42}
@@ -163,4 +251,23 @@ func TestCommentService_DeleteComment_Owner_DeletesComment(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.NotContains(t, commentRepo.comments, 1)
+}
+
+func TestCommentService_DeleteComment_RepoGetByIDError_ReturnsError(t *testing.T) {
+	svc, _, commentRepo, _ := newTestCommentService()
+	commentRepo.getByIDErr = errors.New("db unavailable")
+
+	err := svc.DeleteComment(context.Background(), 1, 1)
+
+	assert.Error(t, err)
+}
+
+func TestCommentService_DeleteComment_RepoDeleteError_ReturnsError(t *testing.T) {
+	svc, _, commentRepo, _ := newTestCommentService()
+	commentRepo.comments[1] = &model.Comment{ID: 1, AuthorID: 1}
+	commentRepo.deleteErr = errors.New("disk full")
+
+	err := svc.DeleteComment(context.Background(), 1, 1)
+
+	assert.Error(t, err)
 }

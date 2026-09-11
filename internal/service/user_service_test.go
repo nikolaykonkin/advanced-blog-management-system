@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"advanced-blog-management-system/internal/errors/apperrors"
@@ -138,4 +139,103 @@ func TestUserService_GetByEmail_NotFound_ReturnsErrUserNotFound(t *testing.T) {
 	_, err := svc.GetByEmail(context.Background(), "ghost@test.com")
 
 	assert.ErrorIs(t, err, apperrors.ErrUserNotFound)
+}
+
+func TestUserService_Register_ExistsByEmailError_ReturnsError(t *testing.T) {
+	repo := newFakeUserRepository()
+	repo.existsByEmailErr = errors.New("db unavailable")
+	svc := NewUserService(repo)
+
+	_, err := svc.Register(context.Background(), &model.UserCreateRequest{
+		Username: "user1", Email: "user1@test.com", Password: "password123",
+	})
+
+	assert.Error(t, err)
+}
+
+func TestUserService_Register_ExistsByUsernameError_ReturnsError(t *testing.T) {
+	repo := newFakeUserRepository()
+	repo.existsByUsernameErr = errors.New("db unavailable")
+	svc := NewUserService(repo)
+
+	_, err := svc.Register(context.Background(), &model.UserCreateRequest{
+		Username: "user1", Email: "user1@test.com", Password: "password123",
+	})
+
+	assert.Error(t, err)
+}
+
+// в отличие от TestUserService_Register_RepoCreateDuplicateError_ReturnsErrUserAlreadyExists,
+// здесь ошибка Create - НЕ repository.ErrDuplicateUser, и не должна маппиться в ErrUserAlreadyExists
+func TestUserService_Register_CreateGenericError_ReturnsError(t *testing.T) {
+	repo := newFakeUserRepository()
+	repo.createErr = errors.New("disk full")
+	svc := NewUserService(repo)
+
+	_, err := svc.Register(context.Background(), &model.UserCreateRequest{
+		Username: "user1", Email: "user1@test.com", Password: "password123",
+	})
+
+	assert.Error(t, err)
+	assert.NotErrorIs(t, err, apperrors.ErrUserAlreadyExists)
+}
+
+func TestUserService_Login_GetByEmailError_ReturnsError(t *testing.T) {
+	repo := newFakeUserRepository()
+	repo.getByEmailErr = errors.New("db unavailable")
+	svc := NewUserService(repo)
+
+	_, err := svc.Login(context.Background(), &model.UserLoginRequest{
+		Email: "user1@test.com", Password: "password123",
+	})
+
+	assert.Error(t, err)
+}
+
+func TestUserService_GetByID_Success(t *testing.T) {
+	repo := newFakeUserRepository()
+	svc := NewUserService(repo)
+	created, err := svc.Register(context.Background(), &model.UserCreateRequest{
+		Username: "user1", Email: "user1@test.com", Password: "password123",
+	})
+	require.NoError(t, err)
+
+	user, err := svc.GetByID(context.Background(), created.ID)
+
+	require.NoError(t, err)
+	assert.Equal(t, "user1@test.com", user.Email)
+}
+
+func TestUserService_GetByID_RepoError_ReturnsError(t *testing.T) {
+	repo := newFakeUserRepository()
+	repo.getByIDErr = errors.New("db unavailable")
+	svc := NewUserService(repo)
+
+	_, err := svc.GetByID(context.Background(), 1)
+
+	assert.Error(t, err)
+}
+
+func TestUserService_GetByEmail_Success(t *testing.T) {
+	repo := newFakeUserRepository()
+	svc := NewUserService(repo)
+	_, err := svc.Register(context.Background(), &model.UserCreateRequest{
+		Username: "user1", Email: "user1@test.com", Password: "password123",
+	})
+	require.NoError(t, err)
+
+	user, err := svc.GetByEmail(context.Background(), "user1@test.com")
+
+	require.NoError(t, err)
+	assert.Equal(t, "user1", user.Username)
+}
+
+func TestUserService_GetByEmail_RepoError_ReturnsError(t *testing.T) {
+	repo := newFakeUserRepository()
+	repo.getByEmailErr = errors.New("db unavailable")
+	svc := NewUserService(repo)
+
+	_, err := svc.GetByEmail(context.Background(), "user1@test.com")
+
+	assert.Error(t, err)
 }

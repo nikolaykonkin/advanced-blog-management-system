@@ -84,6 +84,104 @@ func TestPostService_GetPost_NotFound_ReturnsErrPostNotFound(t *testing.T) {
 	assert.ErrorIs(t, err, apperrors.ErrPostNotFound)
 }
 
+func TestPostService_CreatePost_RepoError_ReturnsError(t *testing.T) {
+	svc, postRepo, _, _ := newTestPostService()
+	postRepo.createErr = errors.New("disk full")
+
+	_, err := svc.CreatePost(context.Background(), &model.PostCreateRequest{Title: "Title", Content: "Content"}, 1)
+
+	assert.Error(t, err)
+}
+
+func TestPostService_GetPost_RepoError_ReturnsError(t *testing.T) {
+	svc, postRepo, _, _ := newTestPostService()
+	postRepo.getByIDErr = errors.New("db unavailable")
+
+	_, err := svc.GetPost(context.Background(), 1)
+
+	assert.Error(t, err)
+}
+
+func TestPostService_GetAllPosts_Success(t *testing.T) {
+	svc, postRepo, _, _ := newTestPostService()
+	postRepo.posts[1] = &model.Post{ID: 1, Title: "One"}
+	postRepo.posts[2] = &model.Post{ID: 2, Title: "Two"}
+
+	posts, err := svc.GetAllPosts(context.Background(), 10, 0)
+
+	require.NoError(t, err)
+	assert.Len(t, posts, 2)
+}
+
+func TestPostService_GetAllPosts_RepoError_ReturnsError(t *testing.T) {
+	svc, postRepo, _, _ := newTestPostService()
+	postRepo.getAllErr = errors.New("db unavailable")
+
+	_, err := svc.GetAllPosts(context.Background(), 10, 0)
+
+	assert.Error(t, err)
+}
+
+func TestPostService_GetPostsCount_Success(t *testing.T) {
+	svc, postRepo, _, _ := newTestPostService()
+	postRepo.posts[1] = &model.Post{ID: 1}
+	postRepo.posts[2] = &model.Post{ID: 2}
+
+	count, err := svc.GetPostsCount(context.Background())
+
+	require.NoError(t, err)
+	assert.Equal(t, 2, count)
+}
+
+func TestPostService_GetPostsCount_RepoError_ReturnsError(t *testing.T) {
+	svc, postRepo, _, _ := newTestPostService()
+	postRepo.getTotalCountErr = errors.New("db unavailable")
+
+	_, err := svc.GetPostsCount(context.Background())
+
+	assert.Error(t, err)
+}
+
+func TestPostService_GetPostsByAuthor_Success(t *testing.T) {
+	svc, postRepo, _, _ := newTestPostService()
+	postRepo.posts[1] = &model.Post{ID: 1, AuthorID: 5}
+	postRepo.posts[2] = &model.Post{ID: 2, AuthorID: 9}
+
+	posts, err := svc.GetPostsByAuthor(context.Background(), 5, 10, 0)
+
+	require.NoError(t, err)
+	require.Len(t, posts, 1)
+	assert.Equal(t, 5, posts[0].AuthorID)
+}
+
+func TestPostService_GetPostsByAuthor_RepoError_ReturnsError(t *testing.T) {
+	svc, postRepo, _, _ := newTestPostService()
+	postRepo.getByAuthorIDErr = errors.New("db unavailable")
+
+	_, err := svc.GetPostsByAuthor(context.Background(), 5, 10, 0)
+
+	assert.Error(t, err)
+}
+
+func TestPostService_GetPostsCountByAuthor_Success(t *testing.T) {
+	svc, postRepo, _, _ := newTestPostService()
+	postRepo.posts[1] = &model.Post{ID: 1, AuthorID: 5}
+
+	count, err := svc.GetPostsCountByAuthor(context.Background(), 5)
+
+	require.NoError(t, err)
+	assert.Equal(t, 1, count)
+}
+
+func TestPostService_GetPostsCountByAuthor_RepoError_ReturnsError(t *testing.T) {
+	svc, postRepo, _, _ := newTestPostService()
+	postRepo.getTotalCountByAuthorIDErr = errors.New("db unavailable")
+
+	_, err := svc.GetPostsCountByAuthor(context.Background(), 5)
+
+	assert.Error(t, err)
+}
+
 func TestPostService_UpdatePost_NotOwner_ReturnsErrForbidden(t *testing.T) {
 	svc, postRepo, _, _ := newTestPostService()
 	postRepo.posts[1] = &model.Post{ID: 1, AuthorID: 42, Title: "Old", Content: "Old"}
@@ -121,6 +219,25 @@ func TestPostService_UpdatePost_InvalidRequest_ReturnsValidationError(t *testing
 	assert.Error(t, err)
 }
 
+func TestPostService_UpdatePost_RepoGetByIDError_ReturnsError(t *testing.T) {
+	svc, postRepo, _, _ := newTestPostService()
+	postRepo.getByIDErr = errors.New("db unavailable")
+
+	_, err := svc.UpdatePost(context.Background(), 1, &model.PostUpdateRequest{Title: "New", Content: "New"}, 1)
+
+	assert.Error(t, err)
+}
+
+func TestPostService_UpdatePost_RepoUpdateError_ReturnsError(t *testing.T) {
+	svc, postRepo, _, _ := newTestPostService()
+	postRepo.posts[1] = &model.Post{ID: 1, AuthorID: 1, Title: "Old", Content: "Old"}
+	postRepo.updateErr = errors.New("disk full")
+
+	_, err := svc.UpdatePost(context.Background(), 1, &model.PostUpdateRequest{Title: "New", Content: "New"}, 1)
+
+	assert.Error(t, err)
+}
+
 func TestPostService_DeletePost_NotOwner_ReturnsErrForbidden(t *testing.T) {
 	svc, postRepo, _, _ := newTestPostService()
 	postRepo.posts[1] = &model.Post{ID: 1, AuthorID: 42}
@@ -154,6 +271,40 @@ func TestPostService_DeletePost_Owner_DeletesPostAndItsComments(t *testing.T) {
 	assert.Contains(t, commentRepo.comments, 3)
 }
 
+func TestPostService_DeletePost_RepoGetByIDError_ReturnsError(t *testing.T) {
+	svc, postRepo, _, _ := newTestPostService()
+	postRepo.getByIDErr = errors.New("db unavailable")
+
+	err := svc.DeletePost(context.Background(), 1, 1)
+
+	assert.Error(t, err)
+}
+
+// В отличие от TestPostService_DeletePost_CommentDeletionExceedsIterationLimit
+// (Delete сообщает об успехе, но ничего не удаляет),
+// здесь Delete возвращает настоящую ошибку сразу
+func TestPostService_DeletePost_CommentDeleteError_ReturnsError(t *testing.T) {
+	svc, postRepo, commentRepo, _ := newTestPostService()
+	postRepo.posts[1] = &model.Post{ID: 1, AuthorID: 1}
+	commentRepo.comments[1] = &model.Comment{ID: 1, PostID: 1}
+	commentRepo.deleteErr = errors.New("row lock timeout")
+
+	err := svc.DeletePost(context.Background(), 1, 1)
+
+	assert.Error(t, err)
+	assert.Contains(t, postRepo.posts, 1, "пост не должен удаляться, если не удалось удалить его комментарии")
+}
+
+func TestPostService_DeletePost_RepoDeleteError_ReturnsError(t *testing.T) {
+	svc, postRepo, _, _ := newTestPostService()
+	postRepo.posts[1] = &model.Post{ID: 1, AuthorID: 1}
+	postRepo.deleteErr = errors.New("disk full")
+
+	err := svc.DeletePost(context.Background(), 1, 1)
+
+	assert.Error(t, err)
+}
+
 // TestPostService_DeletePost_CommentDeletionExceedsIterationLimit проверяет защиту от бесконечного
 // цикла в deleteAllCommentsForPost: если Delete возвращает nil, реально не удаляя комментарий
 // (см. commentRepo.deleteNoOp), GetByPostID на следующей итерации снова видит ту же самую строку —
@@ -175,7 +326,7 @@ func TestPostService_DeletePost_CommentDeletionExceedsIterationLimit(t *testing.
 	svc, postRepo, commentRepo, _ := newTestPostService()
 	postRepo.posts[1] = &model.Post{ID: 1, AuthorID: 1}
 	commentRepo.comments[1] = &model.Comment{ID: 1, PostID: 1}
-	commentRepo.deleteNoOp = true // Delete "врёт": сообщает об успехе, но ничего не удаляет
+	commentRepo.deleteNoOp = true // Delete сообщает об успехе, но ничего не удаляет
 
 	err := svc.DeletePost(context.Background(), 1, 1)
 
@@ -238,7 +389,7 @@ func TestPostService_PublishScheduledPosts_PublishPostError_ContinuesWithRemaini
 
 // TestPostService_PublishScheduledPosts_AllPublishPostErrors_ReturnsZeroPublished —
 // граничный случай предыдущего теста: если падают ВСЕ посты, published должен
-// быть 0, а не "частично успешным" ложным нулём, полученным по случайности
+// быть 0, а не частично ложным нулем, полученным по случайности
 func TestPostService_PublishScheduledPosts_AllPublishPostErrors_ReturnsZeroPublished(t *testing.T) {
 	svc, postRepo, _, _ := newTestPostService()
 	past := time.Now().Add(-1 * time.Hour)
