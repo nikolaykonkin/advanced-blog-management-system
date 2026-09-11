@@ -2,9 +2,12 @@ package service
 
 import (
 	"context"
+	"testing"
 
 	"advanced-blog-management-system/internal/model"
 	"advanced-blog-management-system/internal/repository"
+
+	"github.com/stretchr/testify/assert"
 )
 
 // fakeUserRepository - минимальная in-memory реализация repository.UserRepository
@@ -65,11 +68,23 @@ func (r *fakeUserRepository) ExistsByUsername(ctx context.Context, username stri
 }
 
 func (r *fakeUserRepository) Update(ctx context.Context, user *model.User) error {
+	// старые email/username могли отличаться от новых - без этого они
+	// остались бы висеть в byEmail/byUsername как призрачные записи
+	if old, ok := r.byID[user.ID]; ok {
+		delete(r.byEmail, old.Email)
+		delete(r.byUsername, old.Username)
+	}
 	r.byID[user.ID] = user
+	r.byEmail[user.Email] = user
+	r.byUsername[user.Username] = user
 	return nil
 }
 
 func (r *fakeUserRepository) Delete(ctx context.Context, id int) error {
+	if user, ok := r.byID[id]; ok {
+		delete(r.byEmail, user.Email)
+		delete(r.byUsername, user.Username)
+	}
 	delete(r.byID, id)
 	return nil
 }
@@ -267,3 +282,47 @@ func (l *fakeActionLogger) Log(event string) {
 }
 
 var _ ActionLogger = (*fakeActionLogger)(nil)
+
+// сама фейковая реализация тоже нуждается в тесте: Update и Delete раньше синхронизировали
+// только byID, оставляя старые email/username висеть в byEmail/byUsername - ни один тест это не ловил,
+// так как UserService сейчас вообще не вызывает Update/Delete, но фикс без теста не защитит
+// от регрессии, если такой метод появится в будущем
+
+func TestFakeUserRepository_Update_SyncsAllIndexes(t *testing.T) {
+	repo := newFakeUserRepository()
+	user := &model.User{Email: "old@example.com", Username: "olduser"}
+	_ = repo.Create(context.Background(), user)
+
+	updated := &model.User{ID: user.ID, Email: "new@example.com", Username: "newuser"}
+	err := repo.Update(context.Background(), updated)
+	assert.NoError(t, err)
+
+	byOldEmail, _ := repo.GetByEmail(context.Background(), "old@example.com")
+	byNewEmail, _ := repo.GetByEmail(context.Background(), "new@example.com")
+	byOldUsername, _ := repo.GetByUsername(context.Background(), "olduser")
+	byNewUsername, _ := repo.GetByUsername(context.Background(), "newuser")
+	byID, _ := repo.GetByID(context.Background(), user.ID)
+
+	assert.Nil(t, byOldEmail)
+	assert.Equal(t, updated, byNewEmail)
+	assert.Nil(t, byOldUsername)
+	assert.Equal(t, updated, byNewUsername)
+	assert.Equal(t, updated, byID)
+}
+
+func TestFakeUserRepository_Delete_ClearsAllIndexes(t *testing.T) {
+	repo := newFakeUserRepository()
+	user := &model.User{Email: "gone@example.com", Username: "goneuser"}
+	_ = repo.Create(context.Background(), user)
+
+	err := repo.Delete(context.Background(), user.ID)
+	assert.NoError(t, err)
+
+	byEmail, _ := repo.GetByEmail(context.Background(), "gone@example.com")
+	byUsername, _ := repo.GetByUsername(context.Background(), "goneuser")
+	byID, _ := repo.GetByID(context.Background(), user.ID)
+
+	assert.Nil(t, byEmail)
+	assert.Nil(t, byUsername)
+	assert.Nil(t, byID)
+}
