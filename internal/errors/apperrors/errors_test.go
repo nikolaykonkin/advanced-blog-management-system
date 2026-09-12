@@ -10,7 +10,7 @@ import (
 )
 
 // TestToHTTPStatus_KnownErrors защищает от того, что при добавлении новой ошибки в пакет
-// забудут добавить case в ToHTTPStatus — тогда она молча уйдёт в default (500)
+// забудут добавить case в ToHTTPStatus — тогда она молча уйдет в default (500)
 func TestToHTTPStatus_KnownErrors(t *testing.T) {
 	tests := []struct {
 		name       string

@@ -12,7 +12,7 @@ import (
 )
 
 // ErrDuplicateUser возвращается, когда email или username уже заняты
-// другим пользователем (нарушение UNIQUE-constraint в БД).
+// другим пользователем (нарушение UNIQUE-constraint в БД)
 var ErrDuplicateUser = errors.New("user with this email or username already exists")
 
 const pgUniqueViolationCode = "23505"

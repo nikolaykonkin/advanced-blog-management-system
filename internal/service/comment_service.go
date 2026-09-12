@@ -10,7 +10,7 @@ import (
 )
 
 // ErrPostNotPublished возвращается при попытке оставить комментарий
-// к посту, который ещё не опубликован (черновик/отложенная публикация)
+// к посту, который еще не опубликован (черновик/отложенная публикация)
 var ErrPostNotPublished = errors.New("post is not published yet")
 
 type CommentService struct {
@@ -39,6 +39,9 @@ func (s *CommentService) logAction(event string) {
 }
 
 func (s *CommentService) CreateComment(ctx context.Context, req *model.CommentCreateRequest, postID int, authorID int) (*model.Comment, error) {
+	// authorID существование не проверяется - он берется из подписанного JWT (middleware.GetUserIDFromContext),
+	// поэтому гарантированно принадлежит зарегистрированному пользователю; если пользователя успели
+	// удалить, INSERT упадет на FK-constraint author_id -> users(id)
 	if err := req.Validate(); err != nil {
 		return nil, err
 	}

@@ -21,7 +21,7 @@ type fakeUserRepository struct {
 
 	// createErr, если задан, возвращается из Create вместо реальной вставки -
 	// используется для симуляции гонки на уровне БД (два параллельных запроса
-	// проходят проверку ExistsByEmail/Username, но Create всё равно падает с ErrDuplicateUser)
+	// проходят проверку ExistsByEmail/Username, но Create все равно падает с ErrDuplicateUser)
 	createErr           error
 	getByIDErr          error
 	getByEmailErr       error
@@ -128,10 +128,8 @@ type fakePostRepository struct {
 	getByAuthorIDErr           error
 	getTotalCountByAuthorIDErr error
 
-	// publishErrByID — ошибка PublishPost для КОНКРЕТНОГО id поста, в отличие от publishErr
-	// (падает на любом посте) - нужна, чтобы протестировать PublishScheduledPosts сочетание
-	// "один пост не публикуется, остальные должны опубликоваться все равно" — с одним общим publishErr
-	// такой сценарий не собрать, он либо отключён (nil), либо валит вообще все
+	// publishErrByID — ошибка PublishPost для конкретного id, в отличие от publishErr (падает на любом) -
+	// нужна, чтобы протестировать "один пост падает, остальные публикуются"
 	publishErrByID map[int]error
 
 	// publishedIDs фиксирует, для каких постов реально вызывался PublishPost - используется тестами
@@ -276,10 +274,8 @@ type fakeCommentRepository struct {
 	updateErr           error
 	deleteErr           error
 
-	// deleteNoOp — если true, Delete "врёт": возвращает nil, но комментарий из comments не удаляет
-	// Единственная цель — воспроизвести в тесте сценарий, для которого в deleteAllCommentsForPost стоит
-	// защита от бесконечного цикла (см. maxCommentDeletionIterations в post_service.go): такое поведение
-	// реального Delete в этом проекте не ожидается, но тест должен это проверять
+	// deleteNoOp — если true, Delete "врет": возвращает nil, но ничего не удаляет
+	// нужно для теста на защиту от бесконечного цикла в deleteAllCommentsForPost
 	deleteNoOp bool
 }
 
@@ -374,10 +370,8 @@ func (l *fakeActionLogger) Log(event string) {
 
 var _ ActionLogger = (*fakeActionLogger)(nil)
 
-// сама фейковая реализация тоже нуждается в тесте: Update и Delete раньше синхронизировали
-// только byID, оставляя старые email/username висеть в byEmail/byUsername - ни один тест это не ловил,
-// так как UserService сейчас вообще не вызывает Update/Delete, но фикс без теста не защитит
-// от регрессии, если такой метод появится в будущем
+// UserService пока не вызывает Update/Delete, поэтому фикс индексов ниже проверяется
+// напрямую на самом фейке - иначе регрессия осталась бы незамеченной
 
 func TestFakeUserRepository_Update_SyncsAllIndexes(t *testing.T) {
 	repo := newFakeUserRepository()

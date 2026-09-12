@@ -47,7 +47,7 @@ func TestActionLogger_NoEventsClosesImmediately(t *testing.T) {
 }
 
 func TestActionLogger_InvalidPath_ReturnsError(t *testing.T) {
-	// Директория "does-not-exist" не создаётся автоматически -
+	// Директория "does-not-exist" не создается автоматически -
 	// os.OpenFile должен вернуть ошибку, а New - обернуть ее
 	_, err := New("/does-not-exist/log.txt")
 

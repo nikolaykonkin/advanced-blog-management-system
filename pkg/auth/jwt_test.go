@@ -33,7 +33,7 @@ func TestValidateToken_ValidToken_ReturnsClaims(t *testing.T) {
 
 func TestValidateToken_ExpiredToken_ReturnsError(t *testing.T) {
 	// GenerateToken всегда ставит срок действия +24ч от текущего момента,
-	// поэтому просроченный токен собираем вручную, минуя GenerateToken.
+	// поэтому просроченный токен собираем вручную, минуя GenerateToken
 	claims := Claims{
 		UserID:   1,
 		Email:    "user@test.com",

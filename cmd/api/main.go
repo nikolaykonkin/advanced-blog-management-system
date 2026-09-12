@@ -73,7 +73,7 @@ func getEnv(key, fallback string) string {
 	return fallback
 }
 
-// readMigrations читает все .sql файлы из папки migrations/ в порядке имён
+// readMigrations читает все .sql файлы из папки migrations/ в порядке имен
 // и возвращает их содержимое как срез строк для database.RunMigrations
 func readMigrations() ([]string, error) {
 	entries, err := os.ReadDir("migrations")

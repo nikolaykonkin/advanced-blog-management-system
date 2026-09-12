@@ -25,8 +25,8 @@ func NewCommentHandler(commentService *service.CommentService) *CommentHandler {
 
 // commentServiceErrorStatus расширяет apperrors.ToHTTPStatus для service.ErrPostNotPublished —
 // эта ошибка объявлена локально в пакете service, а не в фиксированном списке apperrors, поэтому
-// ToHTTPStatus про неё не знает и без этой проверки вернул бы 500 вместо
-// корректного 400 ("пост существует, но комментировать его пока нельзя").
+// ToHTTPStatus про нее не знает и без этой проверки вернул бы 500 вместо
+// корректного 400 ("пост существует, но комментировать его пока нельзя")
 func commentServiceErrorStatus(err error) int {
 	if errors.Is(err, service.ErrPostNotPublished) {
 		return http.StatusBadRequest

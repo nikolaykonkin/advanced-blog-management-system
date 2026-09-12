@@ -23,7 +23,7 @@ var (
 
 // jwtSecret читает секрет для проверки JWT из переменной окружения
 // Сигнатуры AuthMiddleware/OptionalAuthMiddleware заданы шаблоном без параметра секрета,
-// поэтому он читается напрямую здесь, а не передаётся через конструктор
+// поэтому он читается напрямую здесь, а не передается через конструктор
 func jwtSecret() string {
 	return os.Getenv("JWT_SECRET")
 }
@@ -49,7 +49,7 @@ func AuthMiddleware(next http.Handler) http.Handler {
 }
 
 // writeAuthError отвечает в том же JSON-формате, что и respondWithError в пакете handler —
-// иначе ошибки от AuthMiddleware (401 до того, как запрос вообще дошёл до хендлера)
+// иначе ошибки от AuthMiddleware (401 до того, как запрос вообще дошел до хендлера)
 // приходили бы клиенту голым текстом (как пишет http.Error), а ошибки бизнес-логики — JSON'ом,
 // что несогласованно для одного и того же API
 func writeAuthError(w http.ResponseWriter, message string, code int) {

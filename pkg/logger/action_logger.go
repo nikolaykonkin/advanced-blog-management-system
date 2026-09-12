@@ -25,7 +25,7 @@ type ActionLogger struct {
 	wg     sync.WaitGroup
 }
 
-// New открывает (или создаёт) файл path в режиме дозаписи и запускаетворкер
+// New открывает (или создает) файл path в режиме дозаписи и запускает воркер
 // Close нужно вызвать при остановке сервера, чтобы воркер корректно завершился
 func New(path string) (*ActionLogger, error) {
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)

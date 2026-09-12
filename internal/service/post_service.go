@@ -11,18 +11,11 @@ import (
 )
 
 // commentDeletionPageSize — размер страницы при постраничном удалении комментариев поста
-// Не const, а var: тесты на maxCommentDeletionIterations (см. ниже) временно подменяют оба значения,
-// чтобы не гонять цикл настоящие сто тысяч раз ради теста на несколько строк
+// var, не const: тесты временно уменьшают оба значения, чтобы не гонять цикл 100000 раз
 var commentDeletionPageSize = 100
 
-// maxCommentDeletionIterations — защитный предел количества итераций цикла в deleteAllCommentsForPost
-// Само по себе GetByPostID/Delete не должны зацикливаться: комментарии реально исчезают из БД
-// после Delete, и следующий GetByPostID с тем же offset=0 видит на commentDeletionPageSize меньше строк
-// Но если Delete по какой-то причине вернёт nil, ничего не удалив на самом деле, цикл станет бесконечным
-// и подвесит запрос на удаление поста навсегда
-// Предел в 100000 страниц при текущем commentDeletionPageSize (100) — это 10 миллионов комментариев
-// на один пост, порог заведомо недостижим при нормальной работе и служит именно предохранителем,
-// а не реальным ограничением нагрузки
+// maxCommentDeletionIterations — защитный предел итераций в deleteAllCommentsForPost
+// на случай, если Delete вернет nil, ничего не удалив - иначе цикл станет бесконечным
 var maxCommentDeletionIterations = 100000
 
 type PostService struct {
@@ -165,10 +158,8 @@ func (s *PostService) DeletePost(ctx context.Context, id int, userID int) error 
 }
 
 // deleteAllCommentsForPost вычищает все комментарии к посту постранично
-// offset намеренно всегда 0: после удаления очередной страницы эти строки
-// исчезают из таблицы, и следующий запрос с тем же offset=0 забирает уже
-// новую "первую страницу" оставшихся комментариев — а не пропускает их,
-// как было бы при обычной постраничной навигации по неизменным данным
+// offset намеренно всегда 0: после удаления страницы следующий запрос с тем же
+// offset=0 видит уже новую "первую страницу" оставшихся комментариев, а не пропускает их
 func (s *PostService) deleteAllCommentsForPost(ctx context.Context, postID int) error {
 	for i := 0; i < maxCommentDeletionIterations; i++ {
 		comments, err := s.commentRepo.GetByPostID(ctx, postID, commentDeletionPageSize, 0)
@@ -204,17 +195,8 @@ func (s *PostService) GetPostsCountByAuthor(ctx context.Context, authorID int) (
 }
 
 // PublishScheduledPosts публикует все черновики, время публикации которых уже наступило
-// Не часть исходного TODO этого файла — добавлено для фонового планировщика
-// (см. runScheduler в api/main.go), который периодически вызывает этот метод
-//
-// Ошибка публикации ОДНОГО поста не должна останавливать обработку остальных:runScheduler вызывается
-// по тикеру раз в 30 секунд для ВСЕХ постов, готовых к публикации сразу, а не по одному - если прерваться
-// на первом же сбое, все последующие уже созревшие посты останутся неопубликованными до следующего тика —
-// и на нём тот же первый "битый" пост, скорее всего, снова окажется первым в списке и снова прервёт цикл,
-// если проблема не саморазрешилась (например, обрыв соединения с БД для конкретной строки)
-// Поэтому ошибки по отдельным постам собираются в errs и не прерывают цикл; в конце они объединяются
-// через errors.Join — вызывающий код (runScheduler) один раз логирует объединённую ошибку и полученный
-// published, вместо того чтобы либо совсем ничего не знать о частичных сбоях, либо получать только первый
+// Ошибка одного поста не прерывает цикл - остальные готовые посты все равно публикуются,
+// иначе один битый пост блокировал бы всю очередь на каждом тике планировщика
 func (s *PostService) PublishScheduledPosts(ctx context.Context) (int, error) {
 	posts, err := s.postRepo.GetScheduledPosts(ctx)
 	if err != nil {
@@ -224,10 +206,7 @@ func (s *PostService) PublishScheduledPosts(ctx context.Context) (int, error) {
 	published := 0
 	var errs []error
 	for _, post := range posts {
-		// Двойная проверка поверх SQL-фильтра GetScheduledPosts: используем
-		// Post.ShouldPublishNow()из internal/model — защита от пограничного случая,
-		// когда publish_at совпадает с моментом выполнения SQL-запроса NOW(),
-		// и даёт этому методу модели реальное применение в коде, а не только в тестах
+		// защита от пограничного случая, когда publish_at совпадает с моментом NOW() в SQL-запросе
 		if !post.ShouldPublishNow() {
 			continue
 		}
@@ -238,8 +217,6 @@ func (s *PostService) PublishScheduledPosts(ctx context.Context) (int, error) {
 		published++
 	}
 
-	// errors.Join возвращает nil, если errs пуст (или содержит только nil) —
-	// поэтому при полном успехе вызывающий код по-прежнему получает err == nil,
-	// как и раньше, без необходимости отдельно проверять len(errs) == 0
+	// errors.Join возвращает nil, если errs пуст, так что успешный путь не меняется
 	return published, errors.Join(errs...)
 }

@@ -306,13 +306,8 @@ func TestPostService_DeletePost_RepoDeleteError_ReturnsError(t *testing.T) {
 }
 
 // TestPostService_DeletePost_CommentDeletionExceedsIterationLimit проверяет защиту от бесконечного
-// цикла в deleteAllCommentsForPost: если Delete возвращает nil, реально не удаляя комментарий
-// (см. commentRepo.deleteNoOp), GetByPostID на следующей итерации снова видит ту же самую строку —
-// без предела по количеству итераций цикл продолжался бы вечно
-//
-// commentDeletionPageSize и maxCommentDeletionIterations временно уменьшены именно для этого теста
-// (через defer возвращаются обратно) - иначе пришлось бы реально прогонять цикл 100000 раз
-// только ради того, чтобы проверить, что предел вообще есть
+// цикла: Delete "врет" и не удаляет комментарий, поэтому GetByPostID видит ту же строку снова
+// commentDeletionPageSize/maxCommentDeletionIterations временно уменьшены через defer
 func TestPostService_DeletePost_CommentDeletionExceedsIterationLimit(t *testing.T) {
 	origPageSize := commentDeletionPageSize
 	origMaxIter := maxCommentDeletionIterations
@@ -332,7 +327,7 @@ func TestPostService_DeletePost_CommentDeletionExceedsIterationLimit(t *testing.
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to delete comments for post")
-	// Пост не должен считаться удалённым, если очистка его комментариев
+	// Пост не должен считаться удаленным, если очистка его комментариев
 	// не завершилась успехом — postRepo.Delete вообще не должен вызываться
 	assert.Contains(t, postRepo.posts, 1)
 }
@@ -360,15 +355,9 @@ func TestPostService_PublishScheduledPosts_GetScheduledPostsError_ReturnsError(t
 	assert.Error(t, err)
 }
 
-// TestPostService_PublishScheduledPosts_PublishPostError_ContinuesWithRemaining — переписан:
-// раньше ошибка публикации ОДНОГО поста прерывала весь цикл, и уже готовые к публикации посты
-// после него оставались черновиками до следующего тика планировщика
-// Теперь падение одного поста не должно мешать опубликовать остальные, готовые к публикации
-//
-// Сценарий: три поста, все три реально готовы к публикации (ShouldPublishNow == true у всех),
-// но пост с ID=2 падает при PublishPost
-// Ожидаем: посты 1 и 3 опубликованы (published == 2, оба ID в publishedIDs), пост 2 — нет, а
-// возвращённая ошибка через errors.Is размечена именно про пост 2
+// TestPostService_PublishScheduledPosts_PublishPostError_ContinuesWithRemaining проверяет, что падение
+// одного поста не прерывает публикацию остальных (раньше вся очередь прерывалась на первой ошибке)
+// Три поста готовы к публикации, падает только пост 2 - посты 1 и 3 должны опубликоваться
 func TestPostService_PublishScheduledPosts_PublishPostError_ContinuesWithRemaining(t *testing.T) {
 	svc, postRepo, _, _ := newTestPostService()
 	past := time.Now().Add(-1 * time.Hour)
@@ -383,7 +372,7 @@ func TestPostService_PublishScheduledPosts_PublishPostError_ContinuesWithRemaini
 
 	assert.Equal(t, 2, published, "посты 1 и 3 должны опубликоваться несмотря на сбой поста 2")
 	require.Error(t, err)
-	assert.ErrorIs(t, err, publishErr, "объединённая ошибка должна содержать исходную ошибку по посту 2")
+	assert.ErrorIs(t, err, publishErr, "объединенная ошибка должна содержать исходную ошибку по посту 2")
 	assert.ElementsMatch(t, []int{1, 3}, postRepo.publishedIDs)
 }
 
