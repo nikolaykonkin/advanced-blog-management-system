@@ -1,192 +1,179 @@
-# Advanced Blog Management System - Template Project
+# Advanced Blog Management System
 
-Это шаблон дипломного проекта на Go для разработки полнофункциональной системы управления блогом с REST API, JWT аутентификацией и PostgreSQL.
+REST API для блог-платформы на Go: регистрация и вход пользователей, посты (включая отложенную публикацию), комментарии, JWT-аутентификация и отложенное логирование действий пользователя через канал и фоновую горутину.
 
-## 📋 Содержание
+Дипломный проект по программе «Go-разработчик с нуля» (Нетология), выполнен на основе шаблона `gopr-temp-ex-main`.
 
-- [О проекте](#о-проекте)
-- [Структура проекта](#структура-проекта)
+## Содержание
+
+- [Архитектура](#архитектура)
 - [Технологический стек](#технологический-стек)
 - [Быстрый старт](#быстрый-старт)
-- [Разработка](#разработка)
+- [Переменные окружения](#переменные-окружения)
 - [API эндпоинты](#api-эндпоинты)
+- [Пример сценария через curl](#пример-сценария-через-curl)
+- [Конкурентность](#конкурентность)
+- [Решения и их обоснование](#решения-и-их-обоснование)
 - [Тестирование](#тестирование)
+- [Docker](#docker)
+- [Известные ограничения](#известные-ограничения)
+- [Частые проблемы](#частые-проблемы)
+- [Возможные доработки](#возможные-доработки)
 
-## О проекте
+## Архитектура
 
-**Advanced Blog Management System** - это дипломный проект для студентов, которые изучают Go, REST API и работу с базами данных. 
-
-Проект включает:
-- ✅ Управление пользователями (регистрация, вход)
-- ✅ Управление постами (создание, редактирование, удаление)
-- ✅ Управление комментариями (создание, редактирование, удаление)
-- ✅ JWT аутентификация и авторизация
-- ✅ Отложенная публикация постов (планировщик)
-- ✅ Логирование и обработка ошибок
-- ✅ Docker контейнеризация
-
-## Структура проекта
+Слоистая архитектура с однонаправленной зависимостью сверху вниз:
 
 ```
-template_project/
-├── cmd/api/
-│   └── main.go                 # Точка входа приложения
+HTTP-запрос
+    │
+    ▼
+Middleware (Logging, Recovery, CORS, Auth)
+    │
+    ▼
+Handler (internal/handler)       — парсинг JSON, HTTP-коды, JSON-ответы
+    │
+    ▼
+Service (internal/service)       — бизнес-логика, валидация, права доступа
+    │
+    ▼
+Repository (internal/repository) — SQL-запросы к PostgreSQL
+```
+
+`Service` зависит от интерфейсов репозиториев (`internal/repository/interfaces.go`), а не от конкретной реализации на `database/sql` — это и позволяет подменять их фейками в юнит-тестах без поднятия настоящей БД.
+
+Структура директорий:
+
+```
+advanced-blog-management-system/
+├── cmd/
+│   └── api/
+│       └── main.go                 # точка входа: конфиг, DI, роутинг, graceful shutdown
 ├── internal/
-│   ├── handler/                # HTTP обработчики
+│   ├── errors/
+│   │   └── apperrors/
+│   │       └── errors.go           # sentinel-ошибки и маппинг в HTTP-статусы
+│   ├── handler/                    # HTTP-обработчики
 │   │   ├── auth_handler.go
 │   │   ├── post_handler.go
 │   │   ├── comment_handler.go
 │   │   └── health.go
-│   ├── middleware/             # HTTP middleware
-│   │   ├── auth.go
-│   │   └── logging.go
-│   ├── model/                  # Модели данных
+│   ├── middleware/                 # middleware уровня HTTP
+│   │   ├── auth.go                 # JWT-аутентификация
+│   │   └── logging.go              # логирование, recovery, CORS
+│   ├── model/                      # модели и DTO
 │   │   └── models.go
-│   ├── repository/             # Слой доступа к БД
+│   ├── repository/                 # слой доступа к данным
 │   │   ├── interfaces.go
 │   │   ├── user_repo.go
 │   │   ├── post_repo.go
 │   │   └── comment_repo.go
-│   └── service/                # Бизнес-логика
+│   └── service/                    # бизнес-логика
 │       ├── user_service.go
 │       ├── post_service.go
-│       └── comment_service.go
+│       ├── comment_service.go
+│       └── logger.go               # интерфейс ActionLogger
 ├── pkg/
-│   ├── auth/                   # Утилиты аутентификации
+│   ├── auth/                       # bcrypt и JWT
 │   │   ├── jwt.go
 │   │   └── password.go
-│   └── database/               # Утилиты БД
-│       └── db.go
-├── migrations/                 # SQL миграции
+│   ├── database/                   # подключение к PostgreSQL
+│   │   └── db.go
+│   └── logger/                     # отложенный логгер (канал + горутина)
+│       └── action_logger.go
+├── migrations/                     # SQL-миграции
 │   ├── 001_init_schema.sql
 │   └── 002_add_indexes.sql
-├── .env.example                # Пример конфигурации
-├── docker-compose.yml          # Docker Compose
-├── Dockerfile                  # Docker образ
-└── go.mod                      # Зависимости проекта
+├── .env.example                    # пример конфигурации
+├── .gitignore
+├── docker-compose.yml
+├── Dockerfile
+├── go.mod
+└── README.md
 ```
 
 ## Технологический стек
 
-- **Язык:** Go 1.24.5
-- **Веб-фреймворк:** Chi Router
-- **База данных:** PostgreSQL 15
-- **Аутентификация:** JWT (golang-jwt)
-- **Хеширование:** bcrypt (golang.org/x/crypto)
-- **Контейнеризация:** Docker, Docker Compose
-- **Валидация:** go-playground/validator
+| Компонент | Библиотека | Назначение |
+|---|---|---|
+| Роутинг | [go-chi/chi](https://github.com/go-chi/chi) | HTTP-роутер, группировка middleware |
+| БД | PostgreSQL 15 + [lib/pq](https://github.com/lib/pq) | хранение данных |
+| Аутентификация | [golang-jwt/jwt/v5](https://github.com/golang-jwt/jwt) | генерация и валидация JWT (HS256) |
+| Хеширование паролей | [golang.org/x/crypto/bcrypt](https://pkg.go.dev/golang.org/x/crypto/bcrypt) | bcrypt |
+| Валидация | [go-playground/validator](https://github.com/go-playground/validator) | валидация DTO по тегам структур |
+| Конфигурация | [joho/godotenv](https://github.com/joho/godotenv) | загрузка `.env` |
+| Тесты | [stretchr/testify](https://github.com/stretchr/testify) | assert/require в юнит-тестах |
+
+Go 1.26, Docker + Docker Compose для контейнеризации.
 
 ## Быстрый старт
 
-### Предварительные требования
+### Требования
 
-- Go 1.24.5 или выше
+- Go 1.26+
 - Docker и Docker Compose
-- Bash или другая оболочка команд
 
-### 1. Подготовка окружения
+### Через Docker (рекомендуется)
 
 ```bash
-# Клонировать репозиторий
-git clone <repo-url>
-cd template_project
-
-# Скопировать конфигурацию
 cp .env.example .env
-
-# Установить Go зависимости
-go mod download
-```
-
-### 2. Запуск БД
-
-```bash
-# Запустить PostgreSQL в Docker
-docker-compose up -d db
-
-# Подождать пока БД запустится (примерно 15 секунд)
-docker-compose logs db
-```
-
-### 3. Разработка и запуск
-
-После реализации всех компонентов:
-
-```bash
-# Запустить приложение
-go run cmd/api/main.go
-
-# Или собрать и запустить
-go build -o api ./cmd/api/main.go
-./api
-```
-
-Приложение будет доступно на `http://localhost:8080`
-
-### 4. Docker контейнеризация
-
-```bash
-# Запустить всё через Docker Compose
 docker-compose up --build
-
-# Остановить
-docker-compose down
-
-# Очистить данные БД
-docker-compose down -v
 ```
 
-## Разработка
+Приложение поднимется на `http://localhost:8080`, миграции применяются автоматически при старте.
 
-### Что уже готово ✅
+### Локально (без Docker)
 
-- Структура проекта и директории
-- Модели данных (User, Post, Comment)
-- Интерфейсы репозиториев
-- SQL миграции (создание таблиц и индексов)
-- Функции хеширования паролей
-- Обработчик Health Check
-- docker-compose.yml для БД
+```bash
+cp .env.example .env
+docker-compose up -d db     # только БД
+go mod download
+go run cmd/api/main.go
+```
 
-### Что нужно реализовать ❌
+## Переменные окружения
 
-1. **Репозитории** (internal/repository/) - работа с БД
-2. **Сервисы** (internal/service/) - бизнес-логика
-3. **Middleware** (internal/middleware/) - аутентификация, логирование
-4. **Обработчики** (internal/handler/) - HTTP эндпоинты
-5. **JWT** (pkg/auth/jwt.go) - генерация и валидация токенов
-6. **БД подключение** (pkg/database/db.go) - создание подключения
-7. **Главная функция** (cmd/api/main.go) - инициализация и маршруты
-
+| Переменная | По умолчанию | Назначение |
+|---|---|---|
+| `DB_HOST` | `localhost` | хост PostgreSQL |
+| `DB_PORT` | `5432` | порт PostgreSQL |
+| `DB_USER` | `postgres` | пользователь БД |
+| `DB_PASSWORD` | `postgres` | пароль БД |
+| `DB_NAME` | `blog_db` | имя базы данных |
+| `DB_SSLMODE` | `disable` | режим SSL для подключения |
+| `JWT_SECRET` | — (обязательна) | секрет для подписи JWT, приложение не стартует без нее |
+| `SERVER_HOST` | `0.0.0.0` | адрес, на котором слушает сервер |
+| `SERVER_PORT` | `8080` | порт сервера |
+| `ACTION_LOG_PATH` | `log.txt` | путь к файлу отложенного лога действий |
 
 ## API эндпоинты
 
-### Публичные эндпоинты
+### Публичные
 
-```
-GET    /api/health                     # Проверка здоровья приложения
-POST   /api/register                   # Регистрация нового пользователя
-POST   /api/login                      # Вход пользователя
-GET    /api/posts                      # Получить все посты
-GET    /api/posts/{id}                 # Получить пост по ID
-GET    /api/users/{id}/posts           # Получить посты пользователя
-GET    /api/posts/{postId}/comments    # Получить комментарии к посту
-```
+| Метод | Путь | Описание |
+|---|---|---|
+| GET | `/api/health` | проверка работоспособности |
+| POST | `/api/register` | регистрация пользователя |
+| POST | `/api/login` | вход, выдача JWT |
+| GET | `/api/posts` | список постов (пагинация `?limit=&offset=`, по умолчанию 10/0) |
+| GET | `/api/posts/{id}` | пост по ID |
+| GET | `/api/users/{authorID}/posts` | посты конкретного автора |
+| GET | `/api/posts/{id}/comments` | комментарии к посту |
 
-### Защищенные эндпоинты (требуют Authorization: Bearer <token>)
+### Защищенные (`Authorization: Bearer <token>`)
 
-```
-POST   /api/posts                      # Создать пост
-PUT    /api/posts/{id}                 # Обновить пост
-DELETE /api/posts/{id}                 # Удалить пост
-POST   /api/posts/{postId}/comments    # Добавить комментарий
-PUT    /api/comments/{id}              # Обновить комментарий
-DELETE /api/comments/{id}              # Удалить комментарий
-```
+| Метод | Путь | Описание |
+|---|---|---|
+| POST | `/api/posts` | создать пост (сразу опубликован либо черновик, если `publish_at` в будущем) |
+| PUT | `/api/posts/{id}` | обновить пост (только автор) |
+| DELETE | `/api/posts/{id}` | удалить пост вместе со всеми его комментариями (только автор) |
+| POST | `/api/posts/{id}/comments` | добавить комментарий (пост должен быть опубликован) |
+| PUT | `/api/comments/{id}` | обновить комментарий (только автор) |
+| DELETE | `/api/comments/{id}` | удалить комментарий (только автор) |
 
-## Тестирование
+Итого 13 эндпоинтов: 7 публичных + 6 защищенных.
 
-### Примеры curl команд
+## Пример сценария через curl
 
 ```bash
 # Health check
@@ -195,219 +182,180 @@ curl http://localhost:8080/api/health
 # Регистрация
 curl -X POST http://localhost:8080/api/register \
   -H "Content-Type: application/json" \
-  -d '{
-    "username": "testuser",
-    "email": "test@example.com",
-    "password": "password123"
-  }'
+  -d '{"username":"johndoe","email":"john@example.com","password":"password123"}'
 
-# Вход и получение токена
+# Вход - в ответе будет token
 curl -X POST http://localhost:8080/api/login \
   -H "Content-Type: application/json" \
-  -d '{
-    "email": "test@example.com",
-    "password": "password123"
-  }'
+  -d '{"email":"john@example.com","password":"password123"}'
 
-# Создание поста (замените TOKEN на реальный токен)
+# Создание поста (замените TOKEN на значение из ответа /login)
 curl -X POST http://localhost:8080/api/posts \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer TOKEN" \
-  -d '{
-    "title": "My First Post",
-    "content": "This is my first post"
-  }'
+  -d '{"title":"My First Post","content":"Hello, world!"}'
 
-# Получение всех постов
-curl http://localhost:8080/api/posts
+# Отложенная публикация - вернется как черновик, планировщик опубликует его
+# через 30 сек после наступления publish_at
+curl -X POST http://localhost:8080/api/posts \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer TOKEN" \
+  -d '{"title":"Scheduled Post","content":"...","publish_at":"2026-01-01T12:00:00Z"}'
 
-# Получение конкретного поста
-curl http://localhost:8080/api/posts/1
+# Комментарий к посту (замените POST_ID на ID из ответа выше)
+curl -X POST http://localhost:8080/api/posts/POST_ID/comments \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer TOKEN" \
+  -d '{"content":"Nice post!"}'
 ```
 
-### Unit тесты
+### Проверка данных через psql
 
 ```bash
-# Запустить тесты
-go test ./...
-
-# Запустить с подробным выводом
-go test -v ./...
-
-# Проверить на race conditions
-go test -race ./...
-
-# Посмотреть покрытие тестами
-go test ./... -cover
-```
-
-## Конфигурация
-
-Переменные окружения задаются в файле `.env`:
-
-```env
-# Database
-DB_HOST=localhost
-DB_PORT=5432
-DB_USER=postgres
-DB_PASSWORD=postgres
-DB_NAME=blog_db
-DB_SSLMODE=disable
-
-# JWT
-JWT_SECRET=your-secret-key-change-in-production
-
-# Server
-SERVER_HOST=0.0.0.0
-SERVER_PORT=8080
-
-# Environment
-ENV=development
-```
-
-## Архитектура приложения
-
-Проект использует чистую архитектуру с разделением ответственности:
-
-```
-┌─────────────────┐
-│  HTTP Requests  │
-└────────┬────────┘
-         │
-┌────────▼────────────────────────┐
-│ Middleware (Auth, Logging, CORS)│
-└────────┬────────────────────────┘
-         │
-┌────────▼─────────────┐
-│ Handlers (HTTP API)  │ ← Парсинг JSON, валидация, HTTP коды
-└────────┬─────────────┘
-         │
-┌────────▼──────────────┐
-│ Services (Business)   │ ← Бизнес-логика, валидация, права
-└────────┬──────────────┘
-         │
-┌────────▼─────────────┐
-│ Repositories (Data)  │ ← SQL запросы, работа с БД
-└────────┬─────────────┘
-         │
-┌────────▼────────┐
-│  PostgreSQL DB  │
-└─────────────────┘
-```
-
-## Базовые концепции
-
-### Context
-
-Все методы БД используют `context.Context` для управления таймаутами и отменой операций:
-
-```go
-user, err := repo.GetByID(ctx, userID)
-```
-
-### Параметризованные запросы
-
-Для защиты от SQL injection используйте параметризованные запросы:
-
-```go
-// ❌ Неправильно
-query := fmt.Sprintf("SELECT * FROM users WHERE id = %d", id)
-
-// ✅ Правильно
-query := "SELECT * FROM users WHERE id = $1"
-db.QueryRow(query, id)
-```
-
-### Обработка ошибок
-
-Всегда проверяйте ошибки:
-
-```go
-if err != nil {
-    if err == sql.ErrNoRows {
-        return nil, nil  // Не найдено - это не ошибка
-    }
-    return nil, fmt.Errorf("failed to query: %w", err)
-}
-```
-
-### JWT токены
-
-Токены генерируются при регистрации/входе и требуются для защищенных операций:
-
-```
-Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
-```
-
-## Полезные команды
-
-```bash
-# Скачать зависимости
-go mod download
-go mod tidy
-
-# Запустить приложение
-go run cmd/api/main.go
-
-# Собрать приложение
-go build -o api ./cmd/api/main.go
-
-# Запустить тесты
-go test ./... -v
-
-# Просмотреть логи БД
-docker-compose logs db -f
-
-# Подключиться к БД
 docker-compose exec db psql -U postgres -d blog_db
-
-# Остановить все сервисы
-docker-compose down
-
-# Очистить данные БД
-docker-compose down -v
 ```
 
-## SQL запросы для ручного тестирования
+Внутри `psql`:
 
 ```sql
--- Подключиться к БД
-docker-compose exec db psql -U postgres -d blog_db
-
--- Просмотреть таблицы
 \dt
-
--- Просмотреть пользователей
 SELECT id, username, email, created_at FROM users;
-
--- Просмотреть посты
-SELECT id, title, status, author_id, created_at FROM posts;
-
--- Просмотреть комментарии
-SELECT id, content, post_id, author_id, created_at FROM comments;
+SELECT id, title, status, author_id FROM posts;
+SELECT id, content, post_id, author_id FROM comments;
 ```
 
-## Критерии успеха
+## Конкурентность
 
-- ✅ Приложение запускается без ошибок
-- ✅ Все 14 API эндпоинтов работают
-- ✅ JWT аутентификация работает правильно
-- ✅ Пользователи могут редактировать только свои посты/комментарии
-- ✅ Тесты проходят (go test ./...)
-- ✅ Нет SQL injection уязвимостей
-- ✅ Правильные HTTP статус коды
-- ✅ Приложение работает в Docker контейнере
+Проект использует два независимых механизма, каждый — отдельная фоновая горутина, запущенная из `main()`.
 
-## Частые вопросы
+### Планировщик отложенной публикации
 
-**Q: Как добавить нового пользователя вручную?**  
-A: Используйте эндпоинт POST /api/register с валидными данными.
+`runScheduler` (`cmd/api/main.go`) каждые 30 секунд вызывает `PostService.PublishScheduledPosts`, которая публикует все черновики, у которых `publish_at` уже наступил. Останавливается через `context.Context`, отменяемый при получении сигнала завершения (`SIGINT`/`SIGTERM`).
 
-**Q: Как получить JWT токен?**  
-A: Отправьте POST /api/login с email и пароль - токен вернется в ответе.
+### Отложенное логирование действий пользователя
 
-**Q: Что делать если БД не подключается?**  
-A: Проверьте что docker-compose up запущен и подождите 15-20 секунд.
+`pkg/logger.ActionLogger` — при создании поста или комментария в канал (`chan string`, буфер 256) отправляется строка-событие; фоновая горутина-воркер вычитывает канал, выдерживает случайную задержку 1-2 секунды и дописывает событие в файл (`log.txt` по умолчанию, путь задается `ACTION_LOG_PATH`). При остановке сервера `Close()` закрывает канал и ждет (`sync.WaitGroup`), пока воркер дозапишет все уже отправленные события, и только после этого закрывает файл.
 
-**Q: Как сбросить БД?**  
-A: Выполните `docker-compose down -v` для удаления всех данных.
+## Решения и их обоснование
+
+**`ErrInvalidCredentials` → HTTP 401, а не 400.** Согласно RFC 9110, 400 означает синтаксически некорректный запрос; неверный email/пароль — это провал аутентификации при синтаксически корректном запросе, что соответствует 401.
+
+**Один и тот же ответ на "email не найден" и "неверный пароль".** И при логине (`UserService.Login`), и при проверке JWT в `AuthMiddleware` возвращается одинаковое сообщение независимо от точной причины отказа — это защита от user enumeration: иначе по разнице в ответах можно было бы перебором узнать, какие email зарегистрированы в системе.
+
+**Гонка при регистрации.** Между проверкой `ExistsByEmail`/`ExistsByUsername` и вставкой `Create` два параллельных запроса теоретически могут пройти проверку одновременно. UNIQUE-constraint в БД в этом случае вернет ошибку прямо из `Create`, и `UserService.Register` распознает именно `repository.ErrDuplicateUser`, возвращая тот же `ErrUserAlreadyExists`, что и при обычной проверке — с точки зрения клиента это неотличимый, тот же самый 409.
+
+**`author_id` в комментарии не проверяется на существование.** `CommentService.CreateComment` берет `authorID` из подписанного JWT и не делает отдельный запрос в `users`, полагаясь на гарантию подписи. Если пользователь был удален уже после выдачи токена (токен живет 24 часа), `INSERT` упадет на внешнем ключе `comments.author_id → users.id`, и это дойдет до клиента как 500 — редкий и приемлемый для этого проекта случай.
+
+**`ON DELETE CASCADE` вместо явного удаления комментариев в репозитории.** Внешние ключи `posts.author_id`, `comments.post_id`, `comments.author_id` объявлены с `ON DELETE CASCADE` — это подстраховка на уровне БД. При этом `PostService.DeletePost` все равно явно и постранично удаляет комментарии перед удалением поста (см. `deleteAllCommentsForPost`), чтобы не полагаться только на каскад и держать логику удаления на уровне сервиса, а не только в схеме.
+
+**`PublishScheduledPosts` не прерывается на ошибке одного поста.** Ошибки по отдельным постам собираются в срез и объединяются через `errors.Join` в конце — иначе один "битый" пост блокировал бы публикацию остальных, уже готовых, постов на каждом тике планировщика.
+
+**Постраничное удаление комментариев с `offset`, всегда равным 0.** После удаления очередной страницы эти строки исчезают из таблицы, и следующий запрос с тем же `offset=0` видит уже новую "первую страницу" оставшихся комментариев, а не пропускает часть из них, как было бы при обычной постраничной навигации по неизменным данным. Число итераций ограничено (`maxCommentDeletionIterations`) на случай, если `Delete` когда-нибудь сообщит об успехе, ничего не удалив на самом деле.
+
+**Пароли хешируются через bcrypt с cost=10.** Cost=10 — стандартное значение по умолчанию, дающее разумный баланс между стойкостью к перебору и задержкой при логине; в production его можно поднять до 12 ценой более медленного логина.
+
+## Тестирование
+
+```bash
+go test ./...              # запустить все тесты
+go test ./... -v           # с подробным выводом
+go test ./... -cover       # с покрытием
+go test ./... -race        # проверка на race conditions
+```
+
+### Что и как тестируется
+
+Проект покрыт юнит-тестами на уровне сервисов, моделей, middleware и утилит. Вместо mock-библиотек используются in-memory фейки репозиториев — стандартный подход в Go-проектах для проверки реального поведения без внешних зависимостей. В `internal/service` фейки объявлены один раз в `fakes_test.go` и переиспользуются между тестами; в `internal/handler` — свои локальные фейки, потому что хендлеры принимают конкретные типы сервисов, а не интерфейсы.
+
+Покрытие по пакетам (`go test ./... -cover`):
+
+| Пакет | Покрытие |
+|---|---|
+| `internal/errors/apperrors` | 100% |
+| `internal/middleware` | 100% |
+| `internal/service` | 95.9% |
+| `pkg/logger` | 94.7% |
+| `internal/model` | 100% |
+| `pkg/auth` | 82.6% |
+| `internal/handler` | 26.1% |
+| `internal/repository` | 0% (требует PostgreSQL) |
+| `pkg/database` | 0% (требует PostgreSQL) |
+| `cmd/api` | 0% (точка входа) |
+
+Общее число, взвешенное по количеству строк (а не среднее по пакетам), для этих шести пакетов — **95.9%** (statements), измерено:
+
+```bash
+go test ./internal/errors/... ./internal/middleware/... ./internal/service/... \
+        ./internal/model/... ./pkg/auth/... ./pkg/logger/... \
+        -coverprofile=coverage.out
+go tool cover -func=coverage.out | tail -1
+```
+
+### Что покрыто и что нет
+
+Покрыто: бизнес-логика сервисов (права доступа, проверки существования, обработка ошибок репозиториев, вызов логгера действий), валидация DTO и бизнес-методы моделей, JWT-аутентификация и остальные middleware, хеширование и токены в `pkg/auth`, отложенная запись в `pkg/logger`, маппинг ошибок в HTTP-статусы, и smoke-тесты критичных хендлеров (health, register, login, создание комментария).
+
+Намеренно не покрыто: `internal/repository` и `pkg/database` требуют реальной PostgreSQL — integration-тесты в рамках диплома не реализованы, SQL-запросы проверены вручную (`docker-compose up` + `curl`); `cmd/api` — точка входа, тоже проверена вручную. Остальные хендлеры (`PostHandler` целиком, часть `CommentHandler`) не покрыты — это дало бы прирост процента без новой информации о качестве кода, раз бизнес-логика под ними уже покрыта на уровне сервисов.
+
+## Docker
+
+### docker-compose.yml
+
+Поднимает два сервиса:
+
+- `db` (`blog_postgres_db`) — PostgreSQL 15 (`postgres:15-alpine`), данные — в volume `postgres_data`
+- `app` (`blog_api`) — собранный Go-бинарник, стартует только после `service_healthy` у `db`
+
+```bash
+docker-compose up --build     # собрать и запустить все
+docker-compose up -d db       # только БД, для локальной разработки
+docker-compose logs -f app    # логи приложения
+docker-compose logs -f db     # логи БД в реальном времени
+docker-compose exec db psql -U postgres -d blog_db   # подключиться к БД
+docker-compose down           # остановить
+docker-compose down -v        # остановить и удалить данные БД
+```
+
+### Dockerfile
+
+Многоступенчатая сборка: стадия `builder` (`golang:1.26-alpine`) компилирует бинарник; стадия `runtime` (`alpine:latest`) содержит только этот бинарник и папку `migrations` — без тулчейна, исходников и `go.mod`. Итоговый образ (`advanced-blog-management-system-app:latest` в выводе `docker images`) — около 11 МБ содержимого за счет этого.
+
+## Известные ограничения
+
+Проект соответствует требованиям дипломного задания; перечисленные ниже пункты — осознанные ограничения, а не недоделки:
+
+- **Integration-тесты для repository не реализованы.** Требуют реальной PostgreSQL и оправданы для production-системы, но избыточны в рамках дипломного проекта
+- **JWT нельзя отозвать до истечения TTL** (24 часа). Для production понадобится refresh-механизм или blacklist отозванных токенов
+- **Нет rate-limiting на `/api/login` и `/api/register`** — оставляет пространство для brute-force атак на пароли
+- **CORS настроен на `*`.** Для production следует сузить `Access-Control-Allow-Origin` до конкретных origin'ов
+- **Отложенный лог хранится в одном файле.** Для нескольких инстансов приложения понадобится централизованное хранилище (например, stdout + внешний сборщик логов)
+
+## Частые проблемы
+
+**Порт 8080 уже занят.**
+```bash
+lsof -i :8080
+docker-compose down
+```
+
+**БД не подключается.**
+```bash
+docker-compose ps
+docker-compose logs db
+```
+
+**Тесты падают с ошибкой версии Go.**
+```bash
+go clean -cache
+go clean -testcache
+```
+
+## Возможные доработки
+
+- Refresh-токены для продления сессии без повторного логина
+- Rate-limiting на чувствительные эндпоинты (login, register)
+- Метрики Prometheus + Grafana для наблюдаемости
+- Soft delete для постов и комментариев вместо физического удаления
+- Полнотекстовый поиск по постам через PostgreSQL `tsvector`
+- Integration-тесты репозиториев через `testcontainers-go`
+- CI-пайплайн (GitHub Actions) с прогоном тестов, `go vet` и сборкой Docker-образа
