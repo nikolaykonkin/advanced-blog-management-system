@@ -7,6 +7,27 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+// TestUser_ToResponse проверяет, что ToResponse копирует публичные поля User в UserResponse
+// UserResponse как тип вообще не содержит поля Password - это гарантия на уровне типов, а не поведения;
+// тест документирует само это намерение, а не проверяет отсутствие поля рефлексией
+func TestUser_ToResponse(t *testing.T) {
+	createdAt := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	user := User{
+		ID:        1,
+		Username:  "nikolay",
+		Email:     "nikolay@example.com",
+		Password:  "super-secret-hash",
+		CreatedAt: createdAt,
+	}
+
+	resp := user.ToResponse()
+
+	assert.Equal(t, user.ID, resp.ID)
+	assert.Equal(t, user.Username, resp.Username)
+	assert.Equal(t, user.Email, resp.Email)
+	assert.Equal(t, user.CreatedAt, resp.CreatedAt)
+}
+
 func TestPost_CanBeEditedBy(t *testing.T) {
 	post := Post{AuthorID: 1}
 
