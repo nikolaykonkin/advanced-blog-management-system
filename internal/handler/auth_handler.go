@@ -30,7 +30,7 @@ func (h *AuthHandler) RegisterHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := req.Validate(); err != nil {
-		h.respondWithError(w, err.Error(), http.StatusBadRequest)
+		h.respondWithError(w, formatValidationError(err), http.StatusBadRequest)
 		return
 	}
 
@@ -62,7 +62,7 @@ func (h *AuthHandler) LoginHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := req.Validate(); err != nil {
-		h.respondWithError(w, err.Error(), http.StatusBadRequest)
+		h.respondWithError(w, formatValidationError(err), http.StatusBadRequest)
 		return
 	}
 

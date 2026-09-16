@@ -53,7 +53,7 @@ func (h *CommentHandler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := req.Validate(); err != nil {
-		h.respondWithError(w, err.Error(), http.StatusBadRequest)
+		h.respondWithError(w, formatValidationError(err), http.StatusBadRequest)
 		return
 	}
 
@@ -114,7 +114,7 @@ func (h *CommentHandler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := req.Validate(); err != nil {
-		h.respondWithError(w, err.Error(), http.StatusBadRequest)
+		h.respondWithError(w, formatValidationError(err), http.StatusBadRequest)
 		return
 	}
 
