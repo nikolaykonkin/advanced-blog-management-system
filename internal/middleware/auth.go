@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"os"
 	"strings"
 )
 
@@ -21,31 +20,51 @@ var (
 	errMalformedAuthHeader = errors.New("authorization header must be in the format: Bearer <token>")
 )
 
-// jwtSecret читает секрет для проверки JWT из переменной окружения
-// Сигнатуры AuthMiddleware/OptionalAuthMiddleware заданы шаблоном без параметра секрета,
-// поэтому он читается напрямую здесь, а не передается через конструктор
-func jwtSecret() string {
-	return os.Getenv("JWT_SECRET")
+// NewAuthMiddleware возвращает middleware, проверяющий JWT и требующий его наличие
+// Секрет передается явно, а не читается из окружения — так зависимость видна в сигнатуре конструктора,
+// а не спрятана внутри функции
+func NewAuthMiddleware(secret string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			token, err := ExtractToken(r)
+			if err != nil {
+				writeAuthError(w, err.Error(), http.StatusUnauthorized)
+				return
+			}
+
+			claims, err := auth.ValidateToken(token, secret)
+			if err != nil {
+				writeAuthError(w, "invalid or expired token", http.StatusUnauthorized)
+				return
+			}
+
+			ctx := context.WithValue(r.Context(), UserKey, claims.UserID)
+			next.ServeHTTP(w, r.WithContext(ctx))
+		})
+	}
 }
 
-// AuthMiddleware проверяет JWT токен и добавляет данные пользователя в context
-func AuthMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		token, err := ExtractToken(r)
-		if err != nil {
-			writeAuthError(w, err.Error(), http.StatusUnauthorized)
-			return
-		}
+// NewOptionalAuthMiddleware — как NewAuthMiddleware, но не блокирует запрос
+// при отсутствии или невалидности токена: просто не кладет user_id в context
+func NewOptionalAuthMiddleware(secret string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			token, err := ExtractToken(r)
+			if err != nil {
+				next.ServeHTTP(w, r)
+				return
+			}
 
-		claims, err := auth.ValidateToken(token, jwtSecret())
-		if err != nil {
-			writeAuthError(w, "invalid or expired token", http.StatusUnauthorized)
-			return
-		}
+			claims, err := auth.ValidateToken(token, secret)
+			if err != nil {
+				next.ServeHTTP(w, r)
+				return
+			}
 
-		ctx := context.WithValue(r.Context(), UserKey, claims.UserID)
-		next.ServeHTTP(w, r.WithContext(ctx))
-	})
+			ctx := context.WithValue(r.Context(), UserKey, claims.UserID)
+			next.ServeHTTP(w, r.WithContext(ctx))
+		})
+	}
 }
 
 // writeAuthError отвечает в том же JSON-формате, что и respondWithError в пакете handler —
@@ -56,26 +75,6 @@ func writeAuthError(w http.ResponseWriter, message string, code int) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
 	json.NewEncoder(w).Encode(map[string]string{"error": message})
-}
-
-// OptionalAuthMiddleware проверяет JWT токен если он присутствует, но не обязателен
-func OptionalAuthMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		token, err := ExtractToken(r)
-		if err != nil {
-			next.ServeHTTP(w, r)
-			return
-		}
-
-		claims, err := auth.ValidateToken(token, jwtSecret())
-		if err != nil {
-			next.ServeHTTP(w, r)
-			return
-		}
-
-		ctx := context.WithValue(r.Context(), UserKey, claims.UserID)
-		next.ServeHTTP(w, r.WithContext(ctx))
-	})
 }
 
 // GetUserIDFromContext извлекает user_id из context

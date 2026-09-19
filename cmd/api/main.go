@@ -178,7 +178,7 @@ func main() {
 	postHandler := handler.NewPostHandler(postService)
 	commentHandler := handler.NewCommentHandler(commentService)
 
-	router := setupRouter(authHandler, postHandler, commentHandler)
+	router := setupRouter(authHandler, postHandler, commentHandler, cfg.jwtSecret)
 
 	schedulerCtx, stopScheduler := context.WithCancel(context.Background())
 	go runScheduler(schedulerCtx, postService)
@@ -230,6 +230,7 @@ func setupRouter(
 	authHandler *handler.AuthHandler,
 	postHandler *handler.PostHandler,
 	commentHandler *handler.CommentHandler,
+	jwtSecret string,
 ) *chi.Mux {
 	r := chi.NewRouter()
 
@@ -250,7 +251,7 @@ func setupRouter(
 
 		// Защищенные эндпоинты
 		api.Group(func(protected chi.Router) {
-			protected.Use(middleware.AuthMiddleware)
+			protected.Use(middleware.NewAuthMiddleware(jwtSecret))
 
 			protected.Post("/posts", postHandler.CreatePost)
 			protected.Put("/posts/{id}", postHandler.UpdatePost)

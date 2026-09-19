@@ -104,7 +104,6 @@ func newDownstreamRecorder() (handler http.Handler, called *bool, gotUserID *int
 }
 
 func TestAuthMiddleware_ValidToken_SetsUserIDAndCallsNext(t *testing.T) {
-	t.Setenv("JWT_SECRET", testJWTSecret)
 	token, _, err := auth.GenerateToken(42, "user@example.com", "user", testJWTSecret)
 	require.NoError(t, err)
 
@@ -113,7 +112,7 @@ func TestAuthMiddleware_ValidToken_SetsUserIDAndCallsNext(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer "+token)
 	rec := httptest.NewRecorder()
 
-	AuthMiddleware(next).ServeHTTP(rec, req)
+	NewAuthMiddleware(testJWTSecret)(next).ServeHTTP(rec, req)
 
 	assert.True(t, *called)
 	assert.Equal(t, 42, *gotUserID)
@@ -126,7 +125,7 @@ func TestAuthMiddleware_MissingHeader_Returns401JSON(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rec := httptest.NewRecorder()
 
-	AuthMiddleware(next).ServeHTTP(rec, req)
+	NewAuthMiddleware(testJWTSecret)(next).ServeHTTP(rec, req)
 
 	assert.False(t, *called)
 	assert.Equal(t, http.StatusUnauthorized, rec.Code)
@@ -140,8 +139,6 @@ func TestAuthMiddleware_MissingHeader_Returns401JSON(t *testing.T) {
 // просроченный токен и мусорная строка должны возвращать одно и то же
 // сообщение - точная причина отказа клиенту не раскрывается
 func TestAuthMiddleware_InvalidToken_ReturnsGenericMessage(t *testing.T) {
-	t.Setenv("JWT_SECRET", testJWTSecret)
-
 	garbageToken := "this-is-not-a-jwt-at-all"
 	wrongSecretToken, _, err := auth.GenerateToken(1, "a@b.com", "a", "a-completely-different-secret")
 	require.NoError(t, err)
@@ -159,7 +156,7 @@ func TestAuthMiddleware_InvalidToken_ReturnsGenericMessage(t *testing.T) {
 			req.Header.Set("Authorization", "Bearer "+tt.token)
 			rec := httptest.NewRecorder()
 
-			AuthMiddleware(next).ServeHTTP(rec, req)
+			NewAuthMiddleware(testJWTSecret)(next).ServeHTTP(rec, req)
 
 			assert.False(t, *called)
 			assert.Equal(t, http.StatusUnauthorized, rec.Code)
@@ -171,6 +168,25 @@ func TestAuthMiddleware_InvalidToken_ReturnsGenericMessage(t *testing.T) {
 	}
 }
 
+// секрет должен браться строго из аргумента конструктора,
+// окружение процесса не должно влиять на проверку токена
+func TestNewAuthMiddleware_IgnoresEnvironment(t *testing.T) {
+	t.Setenv("JWT_SECRET", "secret-set-in-environment")
+
+	token, _, err := auth.GenerateToken(1, "user@example.com", "user", "secret-passed-to-constructor")
+	require.NoError(t, err)
+
+	next, called, _ := newDownstreamRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+
+	NewAuthMiddleware("secret-passed-to-constructor")(next).ServeHTTP(rec, req)
+
+	assert.True(t, *called, "токен, подписанный секретом конструктора, обязан проходить, даже если в окружении другой JWT_SECRET")
+	assert.Equal(t, http.StatusOK, rec.Code)
+}
+
 // ---------------------------------------------------------------------
 // OptionalAuthMiddleware
 // ---------------------------------------------------------------------
@@ -180,7 +196,7 @@ func TestOptionalAuthMiddleware_NoToken_PassesThroughWithoutUserID(t *testing.T)
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rec := httptest.NewRecorder()
 
-	OptionalAuthMiddleware(next).ServeHTTP(rec, req)
+	NewOptionalAuthMiddleware(testJWTSecret)(next).ServeHTTP(rec, req)
 
 	assert.True(t, *called)
 	assert.Equal(t, 0, *gotUserID)
@@ -188,7 +204,6 @@ func TestOptionalAuthMiddleware_NoToken_PassesThroughWithoutUserID(t *testing.T)
 }
 
 func TestOptionalAuthMiddleware_ValidToken_SetsUserID(t *testing.T) {
-	t.Setenv("JWT_SECRET", testJWTSecret)
 	token, _, err := auth.GenerateToken(7, "user@example.com", "user", testJWTSecret)
 	require.NoError(t, err)
 
@@ -197,22 +212,20 @@ func TestOptionalAuthMiddleware_ValidToken_SetsUserID(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer "+token)
 	rec := httptest.NewRecorder()
 
-	OptionalAuthMiddleware(next).ServeHTTP(rec, req)
+	NewOptionalAuthMiddleware(testJWTSecret)(next).ServeHTTP(rec, req)
 
 	assert.True(t, *called)
 	assert.Equal(t, 7, *gotUserID)
 }
 
-// в отличие от AuthMiddleware, невалидный токен здесь не блокирует запрос
+// невалидный токен здесь не блокирует запрос
 func TestOptionalAuthMiddleware_InvalidToken_PassesThroughWithoutUserID(t *testing.T) {
-	t.Setenv("JWT_SECRET", testJWTSecret)
-
 	next, called, gotUserID := newDownstreamRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.Header.Set("Authorization", "Bearer garbage-token")
 	rec := httptest.NewRecorder()
 
-	OptionalAuthMiddleware(next).ServeHTTP(rec, req)
+	NewOptionalAuthMiddleware(testJWTSecret)(next).ServeHTTP(rec, req)
 
 	assert.True(t, *called)
 	assert.Equal(t, 0, *gotUserID)
