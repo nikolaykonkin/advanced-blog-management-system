@@ -9,6 +9,7 @@ import (
 
 	"advanced-blog-management-system/internal/errors/apperrors"
 	"advanced-blog-management-system/internal/model"
+	"advanced-blog-management-system/internal/repository"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -238,6 +239,16 @@ func TestPostService_UpdatePost_RepoUpdateError_ReturnsError(t *testing.T) {
 	assert.Error(t, err)
 }
 
+func TestPostService_UpdatePost_RepositoryNotFound_ReturnsErrPostNotFound(t *testing.T) {
+	svc, postRepo, _, _ := newTestPostService()
+	postRepo.posts[1] = &model.Post{ID: 1, AuthorID: 1, Title: "Old", Content: "Old"}
+	postRepo.updateErr = repository.ErrPostNotFound
+
+	_, err := svc.UpdatePost(context.Background(), 1, &model.PostUpdateRequest{Title: "New", Content: "New"}, 1)
+
+	assert.ErrorIs(t, err, apperrors.ErrPostNotFound)
+}
+
 func TestPostService_DeletePost_NotOwner_ReturnsErrForbidden(t *testing.T) {
 	svc, postRepo, _, _ := newTestPostService()
 	postRepo.posts[1] = &model.Post{ID: 1, AuthorID: 42}
@@ -303,6 +314,16 @@ func TestPostService_DeletePost_RepoDeleteError_ReturnsError(t *testing.T) {
 	err := svc.DeletePost(context.Background(), 1, 1)
 
 	assert.Error(t, err)
+}
+
+func TestPostService_DeletePost_RepositoryNotFound_ReturnsErrPostNotFound(t *testing.T) {
+	svc, postRepo, _, _ := newTestPostService()
+	postRepo.posts[1] = &model.Post{ID: 1, AuthorID: 1}
+	postRepo.deleteErr = repository.ErrPostNotFound
+
+	err := svc.DeletePost(context.Background(), 1, 1)
+
+	assert.ErrorIs(t, err, apperrors.ErrPostNotFound)
 }
 
 // TestPostService_DeletePost_CommentDeletionExceedsIterationLimit проверяет защиту от бесконечного

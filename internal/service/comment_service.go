@@ -124,6 +124,9 @@ func (s *CommentService) UpdateComment(ctx context.Context, id int, req *model.C
 
 	comment.Content = req.Content
 	if err := s.commentRepo.Update(ctx, comment); err != nil {
+		if errors.Is(err, repository.ErrCommentNotFound) {
+			return nil, apperrors.ErrCommentNotFound
+		}
 		return nil, fmt.Errorf("failed to update comment: %w", err)
 	}
 
@@ -143,6 +146,9 @@ func (s *CommentService) DeleteComment(ctx context.Context, id int, userID int) 
 	}
 
 	if err := s.commentRepo.Delete(ctx, id); err != nil {
+		if errors.Is(err, repository.ErrCommentNotFound) {
+			return apperrors.ErrCommentNotFound
+		}
 		return fmt.Errorf("failed to delete comment: %w", err)
 	}
 

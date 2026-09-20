@@ -8,6 +8,7 @@ import (
 
 	"advanced-blog-management-system/internal/errors/apperrors"
 	"advanced-blog-management-system/internal/model"
+	"advanced-blog-management-system/internal/repository"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -226,6 +227,16 @@ func TestCommentService_UpdateComment_RepoUpdateError_ReturnsError(t *testing.T)
 	assert.Error(t, err)
 }
 
+func TestCommentService_UpdateComment_RepositoryNotFound_ReturnsErrCommentNotFound(t *testing.T) {
+	svc, _, commentRepo, _ := newTestCommentService()
+	commentRepo.comments[1] = &model.Comment{ID: 1, AuthorID: 1, Content: "Old"}
+	commentRepo.updateErr = repository.ErrCommentNotFound
+
+	_, err := svc.UpdateComment(context.Background(), 1, &model.CommentUpdateRequest{Content: "New"}, 1)
+
+	assert.ErrorIs(t, err, apperrors.ErrCommentNotFound)
+}
+
 func TestCommentService_DeleteComment_NotOwner_ReturnsErrForbidden(t *testing.T) {
 	svc, _, commentRepo, _ := newTestCommentService()
 	commentRepo.comments[1] = &model.Comment{ID: 1, AuthorID: 42}
@@ -270,4 +281,14 @@ func TestCommentService_DeleteComment_RepoDeleteError_ReturnsError(t *testing.T)
 	err := svc.DeleteComment(context.Background(), 1, 1)
 
 	assert.Error(t, err)
+}
+
+func TestCommentService_DeleteComment_RepositoryNotFound_ReturnsErrCommentNotFound(t *testing.T) {
+	svc, _, commentRepo, _ := newTestCommentService()
+	commentRepo.comments[1] = &model.Comment{ID: 1, AuthorID: 1}
+	commentRepo.deleteErr = repository.ErrCommentNotFound
+
+	err := svc.DeleteComment(context.Background(), 1, 1)
+
+	assert.ErrorIs(t, err, apperrors.ErrCommentNotFound)
 }

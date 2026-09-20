@@ -106,7 +106,7 @@ func (r *postRepository) Update(ctx context.Context, post *model.Post) error {
 		return fmt.Errorf("failed to get rows affected: %w", err)
 	}
 	if rows == 0 {
-		return fmt.Errorf("post with id %d not found", post.ID)
+		return fmt.Errorf("post %d: %w", post.ID, ErrPostNotFound)
 	}
 	return nil
 }
@@ -122,7 +122,7 @@ func (r *postRepository) Delete(ctx context.Context, id int) error {
 		return fmt.Errorf("failed to get rows affected: %w", err)
 	}
 	if rows == 0 {
-		return fmt.Errorf("post with id %d not found", id)
+		return fmt.Errorf("post %d: %w", id, ErrPostNotFound)
 	}
 	return nil
 }
@@ -211,7 +211,7 @@ func (r *postRepository) PublishPost(ctx context.Context, id int) error {
 		return fmt.Errorf("failed to get rows affected: %w", err)
 	}
 	if rows == 0 {
-		return fmt.Errorf("post with id %d not found", id)
+		return fmt.Errorf("post %d: %w", id, ErrPostNotFound)
 	}
 	return nil
 }

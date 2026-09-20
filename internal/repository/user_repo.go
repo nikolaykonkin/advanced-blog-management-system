@@ -135,7 +135,7 @@ func (r *userRepository) Update(ctx context.Context, user *model.User) error {
 		return fmt.Errorf("failed to get rows affected: %w", err)
 	}
 	if rows == 0 {
-		return fmt.Errorf("user with id %d not found", user.ID)
+		return fmt.Errorf("user %d: %w", user.ID, ErrUserNotFound)
 	}
 	return nil
 }
@@ -151,7 +151,7 @@ func (r *userRepository) Delete(ctx context.Context, id int) error {
 		return fmt.Errorf("failed to get rows affected: %w", err)
 	}
 	if rows == 0 {
-		return fmt.Errorf("user with id %d not found", id)
+		return fmt.Errorf("user %d: %w", id, ErrUserNotFound)
 	}
 	return nil
 }

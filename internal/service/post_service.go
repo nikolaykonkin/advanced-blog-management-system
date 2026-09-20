@@ -128,6 +128,9 @@ func (s *PostService) UpdatePost(ctx context.Context, id int, req *model.PostUpd
 	}
 
 	if err := s.postRepo.Update(ctx, post); err != nil {
+		if errors.Is(err, repository.ErrPostNotFound) {
+			return nil, apperrors.ErrPostNotFound
+		}
 		return nil, fmt.Errorf("failed to update post: %w", err)
 	}
 
@@ -151,6 +154,9 @@ func (s *PostService) DeletePost(ctx context.Context, id int, userID int) error 
 	}
 
 	if err := s.postRepo.Delete(ctx, id); err != nil {
+		if errors.Is(err, repository.ErrPostNotFound) {
+			return apperrors.ErrPostNotFound
+		}
 		return fmt.Errorf("failed to delete post: %w", err)
 	}
 

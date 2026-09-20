@@ -104,7 +104,7 @@ func (r *commentRepository) Update(ctx context.Context, comment *model.Comment) 
 		return fmt.Errorf("failed to get rows affected: %w", err)
 	}
 	if rows == 0 {
-		return fmt.Errorf("comment with id %d not found", comment.ID)
+		return fmt.Errorf("comment %d: %w", comment.ID, ErrCommentNotFound)
 	}
 	return nil
 }
@@ -120,7 +120,7 @@ func (r *commentRepository) Delete(ctx context.Context, id int) error {
 		return fmt.Errorf("failed to get rows affected: %w", err)
 	}
 	if rows == 0 {
-		return fmt.Errorf("comment with id %d not found", id)
+		return fmt.Errorf("comment %d: %w", id, ErrCommentNotFound)
 	}
 	return nil
 }
