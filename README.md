@@ -64,6 +64,7 @@ advanced-blog-management-system/
 │   ├── model/                      # модели и DTO
 │   │   └── models.go
 │   ├── repository/                 # слой доступа к данным
+│   │   ├── errors.go               # sentinel-ошибки (not found)
 │   │   ├── interfaces.go
 │   │   ├── user_repo.go
 │   │   ├── post_repo.go
@@ -252,6 +253,8 @@ SELECT id, content, post_id, author_id FROM comments;
 
 **Постраничное удаление комментариев с `offset`, всегда равным 0.** После удаления очередной страницы эти строки исчезают из таблицы, и следующий запрос с тем же `offset=0` видит уже новую "первую страницу" оставшихся комментариев, а не пропускает часть из них, как было бы при обычной постраничной навигации по неизменным данным. Число итераций ограничено (`maxCommentDeletionIterations`) на случай, если `Delete` когда-нибудь сообщит об успехе, ничего не удалив на самом деле.
 
+**Sentinel-ошибки в репозиториях для not-found.** `Update`/`Delete`/`PublishPost` возвращают `repository.ErrXxxNotFound` через `%w` при `RowsAffected() == 0` — это дает HTTP-слою материал для 404, а не 500. Маппинг `repository.ErrXxxNotFound` → `apperrors.ErrXxxNotFound` происходит в сервисах, а не в `apperrors.ToHTTPStatus`: последнее потребовало бы импорта `repository` в `apperrors` и инверсии слоев - `apperrors` не должен знать про персистентность. В сервисах двойная защита: `GetByID` до `Update`/`Delete` ловит обычный случай, а маппинг sentinel-ошибки — защита от race condition, когда запись удалили между `GetByID` и мутацией.
+
 **Пароли хешируются через bcrypt с cost=10.** Cost=10 — стандартное значение по умолчанию, дающее разумный баланс между стойкостью к перебору и задержкой при логине; в production его можно поднять до 12 ценой более медленного логина.
 
 ## Тестирование
@@ -273,16 +276,16 @@ go test ./... -race        # проверка на race conditions
 |---|---|
 | `internal/errors/apperrors` | 100% |
 | `internal/middleware` | 100% |
-| `internal/service` | 95.9% |
+| `internal/service` | 96.1% |
 | `pkg/logger` | 94.7% |
 | `internal/model` | 100% |
 | `pkg/auth` | 82.6% |
-| `internal/handler` | 26.1% |
+| `internal/handler` | 30.8% |
 | `internal/repository` | 0% (требует PostgreSQL) |
 | `pkg/database` | 0% (требует PostgreSQL) |
 | `cmd/api` | 0% (точка входа) |
 
-Общее число, взвешенное по количеству строк (а не среднее по пакетам), для этих шести пакетов — **95.9%** (statements), измерено:
+Общее число, взвешенное по количеству строк (а не среднее по пакетам), для этих шести пакетов — **96.0%** (statements), измерено:
 
 ```bash
 go test ./internal/errors/... ./internal/middleware/... ./internal/service/... \
