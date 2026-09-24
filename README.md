@@ -1,5 +1,7 @@
 # Advanced Blog Management System
 
+![CI](https://github.com/nikolaykonkin/advanced-blog-management-system/actions/workflows/ci.yml/badge.svg)
+
 REST API для блог-платформы на Go: регистрация и вход пользователей, посты (включая отложенную публикацию), комментарии, JWT-аутентификация и отложенное логирование действий пользователя через канал и фоновую горутину.
 
 Дипломный проект по программе «Go-разработчик с нуля» (Нетология), выполнен на основе шаблона `gopr-temp-ex-main`.
