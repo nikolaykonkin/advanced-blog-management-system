@@ -16,18 +16,19 @@ COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -o api ./cmd/api/main.go
 
 # Runtime stage
-FROM alpine:latest
+FROM alpine:3.20
+
+RUN adduser -D -u 10001 appuser
 
 WORKDIR /app
 
-# Copy migrations from builder
 COPY --from=builder /app/migrations ./migrations
-
-# Copy built application from builder
 COPY --from=builder /app/api .
 
-# Expose port
+RUN chown -R appuser:appuser /app
+
+USER appuser
+
 EXPOSE 8080
 
-# Run application
 CMD ["./api"]

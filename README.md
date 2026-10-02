@@ -17,6 +17,7 @@ REST API для блог-платформы на Go: регистрация и �
 - [Конкурентность](#конкурентность)
 - [Решения и их обоснование](#решения-и-их-обоснование)
 - [Тестирование](#тестирование)
+- [CI](#ci)
 - [Docker](#docker)
 - [Известные ограничения](#известные-ограничения)
 - [Частые проблемы](#частые-проблемы)
@@ -120,7 +121,7 @@ Go 1.26, Docker + Docker Compose для контейнеризации.
 
 ```bash
 cp .env.example .env
-docker-compose up --build
+docker compose up --build
 ```
 
 Приложение поднимется на `http://localhost:8080`, миграции применяются автоматически при старте.
@@ -129,7 +130,7 @@ docker-compose up --build
 
 ```bash
 cp .env.example .env
-docker-compose up -d db     # только БД
+docker compose up -d db     # только БД
 go mod download
 go run cmd/api/main.go
 ```
@@ -198,8 +199,9 @@ curl -X POST http://localhost:8080/api/posts \
   -H "Authorization: Bearer TOKEN" \
   -d '{"title":"My First Post","content":"Hello, world!"}'
 
-# Отложенная публикация - вернется как черновик, планировщик опубликует его
-# через 30 сек после наступления publish_at
+# Отложенная публикация - вернется как черновик
+# Планировщик проверяет черновики раз в 30 секунд, поэтому пост станет published
+# в пределах ~30 секунд после наступления publish_at
 curl -X POST http://localhost:8080/api/posts \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer TOKEN" \
@@ -215,7 +217,7 @@ curl -X POST http://localhost:8080/api/posts/POST_ID/comments \
 ### Проверка данных через psql
 
 ```bash
-docker-compose exec db psql -U postgres -d blog_db
+docker compose exec db psql -U postgres -d blog_db
 ```
 
 Внутри `psql`:
@@ -243,7 +245,9 @@ SELECT id, content, post_id, author_id FROM comments;
 
 **`ErrInvalidCredentials` → HTTP 401, а не 400.** Согласно RFC 9110, 400 означает синтаксически некорректный запрос; неверный email/пароль — это провал аутентификации при синтаксически корректном запросе, что соответствует 401.
 
-**Один и тот же ответ на "email не найден" и "неверный пароль".** И при логине (`UserService.Login`), и при проверке JWT в `AuthMiddleware` возвращается одинаковое сообщение независимо от точной причины отказа — это защита от user enumeration: иначе по разнице в ответах можно было бы перебором узнать, какие email зарегистрированы в системе.
+**Один и тот же ответ на "email не найден" и "неверный пароль".** В `UserService.Login` оба случая дают `ErrInvalidCredentials` → 401 с одинаковым сообщением. Это защита от user enumeration: иначе по разнице в ответах можно было бы перебором узнать, какие email зарегистрированы в системе.
+
+**Единое сообщение при невалидном JWT.** `AuthMiddleware` на любой невалидный токен отвечает одинаково ("invalid or expired token"), не раскрывая, истек ли токен, подписан ли другим секретом или просто мусор. Это не защита от enumeration — токен не дает информации о других пользователях. Это просто отказ раскрывать детали проверки, стандартная практика.
 
 **Гонка при регистрации.** Между проверкой `ExistsByEmail`/`ExistsByUsername` и вставкой `Create` два параллельных запроса теоретически могут пройти проверку одновременно. UNIQUE-constraint в БД в этом случае вернет ошибку прямо из `Create`, и `UserService.Register` распознает именно `repository.ErrDuplicateUser`, возвращая тот же `ErrUserAlreadyExists`, что и при обычной проверке — с точки зрения клиента это неотличимый, тот же самый 409.
 
@@ -300,7 +304,16 @@ go tool cover -func=coverage.out | tail -1
 
 Покрыто: бизнес-логика сервисов (права доступа, проверки существования, обработка ошибок репозиториев, вызов логгера действий), валидация DTO и бизнес-методы моделей, JWT-аутентификация и остальные middleware, хеширование и токены в `pkg/auth`, отложенная запись в `pkg/logger`, маппинг ошибок в HTTP-статусы, и smoke-тесты критичных хендлеров (health, register, login, создание комментария).
 
-Намеренно не покрыто: `internal/repository` и `pkg/database` требуют реальной PostgreSQL — integration-тесты в рамках диплома не реализованы, SQL-запросы проверены вручную (`docker-compose up` + `curl`); `cmd/api` — точка входа, тоже проверена вручную. Остальные хендлеры (`PostHandler` целиком, часть `CommentHandler`) не покрыты — это дало бы прирост процента без новой информации о качестве кода, раз бизнес-логика под ними уже покрыта на уровне сервисов.
+Намеренно не покрыто: `internal/repository` и `pkg/database` требуют реальной PostgreSQL — integration-тесты в рамках диплома не реализованы, SQL-запросы проверены вручную (`docker compose up` + `curl`); `cmd/api` — точка входа, тоже проверена вручную. Остальные хендлеры (`PostHandler` целиком, часть `CommentHandler`) автотестами не покрыты; бизнес-логика под ними покрыта на уровне сервисов.
+
+### CI
+
+GitHub Actions (`.github/workflows/ci.yml`) на каждый `push` и `pull_request`:
+
+1. `go vet ./...`
+2. `go test -race -cover ./...`
+
+Версия Go в CI — `1.26`, как и в `go.mod` и `Dockerfile`.
 
 ## Docker
 
@@ -312,24 +325,30 @@ go tool cover -func=coverage.out | tail -1
 - `app` (`blog_api`) — собранный Go-бинарник, стартует только после `service_healthy` у `db`
 
 ```bash
-docker-compose up --build     # собрать и запустить все
-docker-compose up -d db       # только БД, для локальной разработки
-docker-compose logs -f app    # логи приложения
-docker-compose logs -f db     # логи БД в реальном времени
-docker-compose exec db psql -U postgres -d blog_db   # подключиться к БД
-docker-compose down           # остановить
-docker-compose down -v        # остановить и удалить данные БД
+docker compose up --build     # собрать и запустить все
+docker compose up -d db       # только БД, для локальной разработки
+docker compose logs -f app    # логи приложения
+docker compose logs -f db     # логи БД в реальном времени
+docker compose exec db psql -U postgres -d blog_db   # подключиться к БД
+docker compose down           # остановить
+docker compose down -v        # остановить и удалить данные БД
 ```
 
 ### Dockerfile
 
-Многоступенчатая сборка: стадия `builder` (`golang:1.26-alpine`) компилирует бинарник; стадия `runtime` (`alpine:latest`) содержит только этот бинарник и папку `migrations` — без тулчейна, исходников и `go.mod`. Итоговый образ (`advanced-blog-management-system-app:latest` в выводе `docker images`) — около 11 МБ содержимого за счет этого.
+Многоступенчатая сборка:
+
+- **builder** (`golang:1.26-alpine`) компилирует бинарник командой `CGO_ENABLED=0 GOOS=linux go build -o api ./cmd/api/main.go`. `CGO_ENABLED=0` отключает cgo и дает статически слинкованный бинарник — именно поэтому в runtime-стадии не нужны glibc и другие системные библиотеки, и в финальный образ попадает только сам бинарник.
+- **runtime** (`alpine:3.20`) содержит только бинарник и папку `migrations` — без тулчейна, исходников и `go.mod`. Приложение запускается от непривилегированного пользователя `appuser`
+  (`adduser` + `USER` в Dockerfile).
+
+Итоговый образ (`advanced-blog-management-system-app:latest` в выводе `docker images`) — около 11 МБ содержимого (`CONTENT SIZE`), проверено локально.
 
 ## Известные ограничения
 
-Проект соответствует требованиям дипломного задания; перечисленные ниже пункты — осознанные ограничения, а не недоделки:
+Перечисленные ниже пункты — осознанные ограничения проекта:
 
-- **Integration-тесты для repository не реализованы.** Требуют реальной PostgreSQL и оправданы для production-системы, но избыточны в рамках дипломного проекта
+- **Integration-тесты для repository не реализованы.** Требуют реальной PostgreSQL; в планах — `testcontainers-go`
 - **JWT нельзя отозвать до истечения TTL** (24 часа). Для production понадобится refresh-механизм или blacklist отозванных токенов
 - **Нет rate-limiting на `/api/login` и `/api/register`** — оставляет пространство для brute-force атак на пароли
 - **CORS настроен на `*`.** Для production следует сузить `Access-Control-Allow-Origin` до конкретных origin'ов
@@ -340,19 +359,28 @@ docker-compose down -v        # остановить и удалить данн�
 **Порт 8080 уже занят.**
 ```bash
 lsof -i :8080
-docker-compose down
+docker compose down
 ```
 
 **БД не подключается.**
 ```bash
-docker-compose ps
-docker-compose logs db
+docker compose ps
+docker compose logs db
 ```
 
 **Тесты падают с ошибкой версии Go.**
+
+Проверьте текущую версию и убедитесь, что установлена 1.26 — либо что Go умеет сам подтягивать нужный тулчейн:
+
 ```bash
-go clean -cache
-go clean -testcache
+go version
+# ожидаем: go version go1.26.x ...
+```
+
+Если версия ниже 1.26 — обновите Go или разрешите автоматическую загрузку toolchain:
+
+```bash
+export GOTOOLCHAIN=auto
 ```
 
 ## Возможные доработки
@@ -363,4 +391,3 @@ go clean -testcache
 - Soft delete для постов и комментариев вместо физического удаления
 - Полнотекстовый поиск по постам через PostgreSQL `tsvector`
 - Integration-тесты репозиториев через `testcontainers-go`
-- CI-пайплайн (GitHub Actions) с прогоном тестов, `go vet` и сборкой Docker-образа
